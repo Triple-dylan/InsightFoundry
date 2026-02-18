@@ -476,8 +476,24 @@
         backdrop-filter: none;
       }
       .workspace.codex-layout {
-        grid-template-columns: 220px 1fr 360px;
+        grid-template-columns: 240px minmax(0, 1fr) 360px;
         gap: 12px;
+        transition: grid-template-columns 180ms ease;
+      }
+      .workspace.codex-layout.left-collapsed {
+        grid-template-columns: minmax(0, 1fr) 360px;
+      }
+      .workspace.codex-layout.right-collapsed {
+        grid-template-columns: 240px minmax(0, 1fr);
+      }
+      .workspace.codex-layout.left-collapsed.right-collapsed {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .workspace.codex-layout.left-collapsed .left-rail {
+        display: none;
+      }
+      .workspace.codex-layout.right-collapsed .right-rail {
+        display: none;
       }
       .workspace.codex-layout .left-rail,
       .workspace.codex-layout .center,
@@ -488,8 +504,25 @@
         padding: 12px;
       }
       .workspace.codex-layout .center {
-        grid-template-rows: auto 1fr;
+        grid-template-rows: auto auto 1fr;
         gap: 10px;
+      }
+      .workspace.codex-layout .doc-header {
+        border: 1px solid var(--line);
+      }
+      .workspace.codex-layout #dataContextStrip {
+        border: 1px solid var(--line);
+      }
+      .workspace.codex-layout .context-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .workspace.codex-layout .context-kv {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        background: #fbfcfd;
       }
       .workspace.codex-layout .left-rail .toolbar button,
       .workspace.codex-layout .tabs .tab,
@@ -528,6 +561,9 @@
       .workspace.codex-layout .run-builder-compact .toolbar button {
         flex: 1 1 auto;
       }
+      .workspace.codex-layout .run-builder-compact h3 {
+        margin-bottom: 10px;
+      }
       @media (prefers-reduced-motion: reduce) {
         * {
           transition: none !important;
@@ -545,6 +581,14 @@
         .preview-grid {
           grid-template-columns: 1fr;
         }
+        .workspace.codex-layout .context-grid {
+          grid-template-columns: 1fr;
+        }
+        .workspace.codex-layout.left-collapsed,
+        .workspace.codex-layout.right-collapsed,
+        .workspace.codex-layout.left-collapsed.right-collapsed {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -558,11 +602,17 @@
             <div class="subtle" id="tenantLabel">Tenant: loading...</div>
           </div>
         </div>
-        <nav class="nav">
-          <button data-route-target="workspace" class="active">Workspace</button>
-          <button data-route-target="settings">Settings</button>
-          <button data-route-target="runs">Runs</button>
-        </nav>
+        <div style="display:flex; gap:8px; align-items:center">
+          <div class="nav">
+            <button data-route-target="workspace" class="active">Workspace</button>
+            <button data-route-target="settings">Settings</button>
+            <button data-route-target="runs">Runs</button>
+          </div>
+          <div class="nav">
+            <button id="toggleLeftRailBtn" type="button">Hide Left</button>
+            <button id="toggleRightRailBtn" type="button">Hide Right</button>
+          </div>
+        </div>
       </header>
 
       <main class="main">
@@ -597,16 +647,18 @@
             </aside>
 
             <section class="center panel">
-              <div class="card">
-                <h2 style="margin:0">Workspace</h2>
-                <div class="subtle">Chat-first analysis with run-aware context.</div>
+              <div class="card doc-header">
+                <div class="subtle mono">Workspace / Data Copilot</div>
+                <h2 style="margin:4px 0 2px">Ask, Analyze, Deliver</h2>
+                <div class="subtle">Codex-style execution with Notion-like context blocks grounded in your run data.</div>
               </div>
+              <div class="card" id="dataContextStrip"></div>
               <div id="onboardingChecklist" class="onboard" style="display:none"></div>
               <div class="kpis" id="kpiGrid" style="display:none"></div>
               <section class="chat">
                 <div class="thread" id="thread"></div>
                 <form id="chatForm" class="composer">
-                  <textarea id="chatInput" placeholder="Ask for forecast, anomaly scan, or suggest actions from current run context"></textarea>
+                  <textarea id="chatInput" placeholder="Ask for a revenue forecast, anomaly scan, root-cause breakdown, or action plan from current run context"></textarea>
                   <button type="submit" class="primary">Send</button>
                 </form>
               </section>
@@ -699,6 +751,8 @@
         route: "workspace",
         settingsTab: "general",
         contextTab: "summary",
+        leftRailCollapsed: false,
+        rightRailCollapsed: false,
         activeRunId: null,
         settings: null,
         connections: [],
@@ -773,6 +827,24 @@
         document.querySelectorAll(".route").forEach((routeEl) => {
           routeEl.classList.toggle("active", routeEl.id === `route-${route}`);
         });
+        applyWorkspaceLayout();
+      }
+
+      function applyWorkspaceLayout() {
+        const workspace = document.querySelector(".workspace.codex-layout");
+        if (!workspace) return;
+        workspace.classList.toggle("left-collapsed", appState.leftRailCollapsed);
+        workspace.classList.toggle("right-collapsed", appState.rightRailCollapsed);
+        const leftBtn = document.getElementById("toggleLeftRailBtn");
+        const rightBtn = document.getElementById("toggleRightRailBtn");
+        if (leftBtn) {
+          leftBtn.textContent = appState.leftRailCollapsed ? "Show Left" : "Hide Left";
+          leftBtn.disabled = appState.route !== "workspace";
+        }
+        if (rightBtn) {
+          rightBtn.textContent = appState.rightRailCollapsed ? "Show Right" : "Hide Right";
+          rightBtn.disabled = appState.route !== "workspace";
+        }
       }
 
       function appendMessage(text, role = "ai") {
@@ -897,6 +969,7 @@
             appState.activeRunId = run.id;
             await refreshRunArtifacts();
             renderRunContextList();
+            renderDataContextStrip();
             renderContextPanel();
             renderRunDetail();
           };
@@ -918,6 +991,28 @@
 
       function currentRun() {
         return appState.runs.find((item) => item.id === appState.activeRunId) || null;
+      }
+
+      function renderDataContextStrip() {
+        const box = document.getElementById("dataContextStrip");
+        if (!box) return;
+        const run = currentRun();
+        const source = appState.connections.find((item) => item.id === (run?.sourceConnectionId || document.getElementById("runSourceSelect")?.value)) || null;
+        const model = appState.profiles.find((item) => item.id === (run?.modelProfileId || document.getElementById("runModelSelect")?.value)) || null;
+        const reportType = appState.reportTypes.find((item) => item.id === (run?.reportTypeId || document.getElementById("runReportSelect")?.value)) || null;
+        const skill = appState.skillsInstalled.find((item) => item.id === (run?.skillId || document.getElementById("runSkillSelect")?.value)) || null;
+        const insight = run?.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : appState.latestInsight;
+        box.innerHTML = `
+          <div class="subtle mono">DATA CONTEXT</div>
+          <div class="context-grid" style="margin-top:8px">
+            <div class="context-kv"><div class="subtle">Source</div><div>${source?.sourceType || "Not selected"}</div></div>
+            <div class="context-kv"><div class="subtle">Model</div><div>${model?.name || "Not selected"}</div></div>
+            <div class="context-kv"><div class="subtle">Report</div><div>${reportType?.name || "Not selected"}</div></div>
+            <div class="context-kv"><div class="subtle">Skill</div><div>${skill?.id || "None"}</div></div>
+            <div class="context-kv"><div class="subtle">Run Status</div><div>${run ? run.status : "Drafting"}</div></div>
+            <div class="context-kv"><div class="subtle">Confidence</div><div>${insight?.confidence != null ? Number(insight.confidence).toFixed(2) : "n/a"}</div></div>
+          </div>
+        `;
       }
 
       function renderRunHealthBadges() {
@@ -1022,6 +1117,7 @@
         if (run?.channels?.length) {
           document.getElementById("runChannelsInput").value = run.channels.join(",");
         }
+        renderDataContextStrip();
       }
 
       function renderRunPreviews() {
@@ -1103,6 +1199,7 @@
             await refreshRunArtifacts();
             renderRunDetail();
             renderRunContextList();
+            renderDataContextStrip();
             renderContextPanel();
           };
           box.appendChild(btn);
@@ -1988,7 +2085,9 @@
         renderRunList();
         renderRunDetail();
         renderContextPanel();
+        renderDataContextStrip();
         renderSettings();
+        applyWorkspaceLayout();
       }
 
       async function initTenant() {
@@ -2139,6 +2238,20 @@
         document.querySelectorAll("[data-route-target]").forEach((btn) => {
           btn.onclick = () => setRoute(btn.dataset.routeTarget);
         });
+        const leftToggle = document.getElementById("toggleLeftRailBtn");
+        const rightToggle = document.getElementById("toggleRightRailBtn");
+        if (leftToggle) {
+          leftToggle.onclick = () => {
+            appState.leftRailCollapsed = !appState.leftRailCollapsed;
+            applyWorkspaceLayout();
+          };
+        }
+        if (rightToggle) {
+          rightToggle.onclick = () => {
+            appState.rightRailCollapsed = !appState.rightRailCollapsed;
+            applyWorkspaceLayout();
+          };
+        }
 
         document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
           btn.onclick = () => setSettingsTab(btn.dataset.settingsTab);
@@ -2165,6 +2278,7 @@
           const el = document.getElementById(id);
           if (!el) return;
           el.addEventListener("change", () => {
+            renderDataContextStrip();
             previewCurrentRunOutput().catch((error) => appendMessage(`Preview error: ${error.message}`));
           });
         });
@@ -2199,6 +2313,7 @@
 
       async function boot() {
         bindEvents();
+        applyWorkspaceLayout();
         renderSavedPrompts();
         renderThreadList();
         await initTenant();
