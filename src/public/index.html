@@ -433,7 +433,7 @@
       }
       .mono { font-family: "JetBrains Mono", monospace; }
 
-      /* Workspace V3: simplify toward codex-like density and hierarchy */
+      /* Workspace V4: codex-like hierarchy */
       :root {
         --bg: #f4f6f8;
         --panel: #ffffff;
@@ -471,86 +471,61 @@
       .item,
       .chat,
       .context-body,
-      .commandbar,
-      .workspace-hero,
       .preview-panel {
         background: #ffffff;
         backdrop-filter: none;
       }
-      .workspace {
+      .workspace.codex-layout {
         grid-template-columns: 220px 1fr 360px;
         gap: 12px;
       }
-      .left-rail,
-      .center,
-      .right-rail {
+      .workspace.codex-layout .left-rail,
+      .workspace.codex-layout .center,
+      .workspace.codex-layout .right-rail {
         padding: 10px;
       }
-      .left-rail .card {
+      .workspace.codex-layout .left-rail .card {
         padding: 12px;
       }
-      .center {
-        grid-template-rows: auto auto auto 1fr;
+      .workspace.codex-layout .center {
+        grid-template-rows: auto 1fr;
+        gap: 10px;
       }
-      .workspace-hero {
-        border-color: var(--line);
-        padding: 14px;
-      }
-      .workspace-hero h2 {
-        font-size: 38px;
-        letter-spacing: -0.02em;
-        margin-bottom: 6px;
-      }
-      .value-points {
-        font-size: 12px;
-        color: var(--muted);
-      }
-      .commandbar {
-        border: 1px solid var(--line);
-        padding: 10px;
-      }
-      .quick-actions button {
+      .workspace.codex-layout .left-rail .toolbar button,
+      .workspace.codex-layout .tabs .tab,
+      .workspace.codex-layout .run-builder-compact .toolbar button {
         font-family: "Sora", sans-serif;
       }
-      .kpis {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-      .kpi .val {
-        font-size: 18px;
-      }
-      .chat {
+      .workspace.codex-layout .chat {
         min-height: 58vh;
         border-color: var(--line);
       }
-      .thread {
+      .workspace.codex-layout .thread {
         padding: 16px;
       }
-      .msg {
+      .workspace.codex-layout .msg {
         border-radius: 12px;
         border-color: #dfe4ea;
       }
-      .msg.user {
+      .workspace.codex-layout .msg.user {
         background: #eef4ff;
         border-color: #c9dafc;
       }
-      .composer {
+      .workspace.codex-layout .composer {
         background: #ffffff;
       }
-      .composer textarea {
+      .workspace.codex-layout .composer textarea {
         min-height: 56px;
       }
-      .right-rail .stepper {
+      .workspace.codex-layout .right-rail .stepper {
         gap: 10px;
       }
-      .step {
+      .workspace.codex-layout .step {
         border-style: solid;
         border-color: #e2e7ee;
         background: #fafbfd;
       }
-      .tabs .tab {
-        font-family: "Sora", sans-serif;
-      }
-      .run-builder-compact .toolbar button {
+      .workspace.codex-layout .run-builder-compact .toolbar button {
         flex: 1 1 auto;
       }
       @media (prefers-reduced-motion: reduce) {
@@ -593,11 +568,25 @@
       <main class="main">
         <div id="systemAlert" class="system-alert" hidden></div>
         <section id="route-workspace" class="route active">
-          <div class="workspace">
+          <div class="workspace codex-layout">
             <aside class="left-rail panel">
               <div class="card">
+                <h3>Actions</h3>
+                <div class="toolbar">
+                  <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
+                  <button id="quickExecuteBtn" type="button">Execute</button>
+                  <button id="quickDeliverBtn" type="button">Deliver</button>
+                  <button id="quickSettingsBtn" type="button">Settings</button>
+                </div>
+                <form id="commandForm" class="command-line" style="margin-top:8px">
+                  <kbd>cmd+k</kbd>
+                  <input id="commandInput" placeholder="new run | execute run | open settings connections" />
+                  <button type="submit">Run</button>
+                </form>
+              </div>
+              <div class="card">
                 <h3>Analyses</h3>
-                <div class="subtle">Recent runs and active context</div>
+                <div class="subtle">Recent runs</div>
                 <div id="runContextList" class="list"></div>
               </div>
               <div class="card">
@@ -608,34 +597,12 @@
             </aside>
 
             <section class="center panel">
-              <div class="workspace-hero">
-                <h2>Firm Data Copilot</h2>
-                <p class="subtle">Configure once in Settings, run analysis in Workspace, monitor and retry deliveries in Runs.</p>
-                <ul class="value-points">
-                  <li>Ingest and normalize firm data from common DB and SaaS systems.</li>
-                  <li>Run policy-gated models and skills with evidence and confidence traces.</li>
-                  <li>Generate channel-ready outputs with retries, auditability, and run timelines.</li>
-                </ul>
+              <div class="card">
+                <h2 style="margin:0">Workspace</h2>
+                <div class="subtle">Chat-first analysis with run-aware context.</div>
               </div>
-
-              <div class="commandbar">
-                <div class="quick-actions">
-                  <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
-                  <button id="quickExecuteBtn" type="button">Execute</button>
-                  <button id="quickDeliverBtn" type="button">Deliver</button>
-                  <button id="quickSettingsBtn" type="button">Open Settings</button>
-                </div>
-                <form id="commandForm" class="command-line">
-                  <kbd>cmd+k</kbd>
-                  <input id="commandInput" placeholder="Try: new run | execute run | open settings channels | open settings models" />
-                  <button type="submit">Run</button>
-                </form>
-              </div>
-
-              <div id="onboardingChecklist" class="onboard"></div>
-
-              <div class="kpis" id="kpiGrid"></div>
-
+              <div id="onboardingChecklist" class="onboard" style="display:none"></div>
+              <div class="kpis" id="kpiGrid" style="display:none"></div>
               <section class="chat">
                 <div class="thread" id="thread"></div>
                 <form id="chatForm" class="composer">
@@ -651,22 +618,22 @@
                 <div class="badges" id="runHealthBadges"></div>
               </div>
               <div class="card stepper run-builder-compact">
-                <h3>Guided Analysis Run</h3>
+                <h3>Run Setup</h3>
                 <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
                 <div class="step">2. Model Profile: <select id="runModelSelect"></select></div>
                 <div class="step">3. Report Type: <select id="runReportSelect"></select></div>
                 <div class="step">4. Skill (optional): <select id="runSkillSelect"></select></div>
                 <div class="step">5. Channels: <input id="runChannelsInput" value="email,slack" /></div>
                 <div class="toolbar">
-                  <button id="createRunBtn" type="button" class="primary">Create Draft Run</button>
-                  <button id="executeRunBtn" type="button">Execute Current Run</button>
-                  <button id="deliverRunBtn" type="button">Deliver Output</button>
-                  <button id="previewRunBtn" type="button">Preview Output</button>
+                  <button id="createRunBtn" type="button" class="primary">Create Draft</button>
+                  <button id="executeRunBtn" type="button">Execute</button>
+                  <button id="deliverRunBtn" type="button">Deliver</button>
+                  <button id="previewRunBtn" type="button">Preview</button>
                 </div>
                 <div class="preview-grid">
                   <div class="preview-panel">
                     <h4>Report Preview</h4>
-                    <pre id="runReportPreview" class="mono">Select a report type, then click Preview Output.</pre>
+                    <pre id="runReportPreview" class="mono">Select a report type, then click Preview.</pre>
                   </div>
                   <div class="preview-panel">
                     <h4>Channel Preview</h4>
@@ -674,7 +641,7 @@
                   </div>
                 </div>
               </div>
-              <div class="tabs">
+              <div class="tabs card">
                 <button class="tab active" data-context-tab="summary">Summary</button>
                 <button class="tab" data-context-tab="evidence">Evidence</button>
                 <button class="tab" data-context-tab="actions">Actions</button>
