@@ -15,7 +15,9 @@ const SOURCE_CATALOG = [
   { sourceType: "salesforce", family: "saas", domains: ["sales", "ops"], modes: ["ingest", "hybrid"] },
   { sourceType: "hubspot", family: "saas", domains: ["sales", "marketing"], modes: ["ingest", "hybrid"] },
   { sourceType: "stripe", family: "saas", domains: ["finance"], modes: ["ingest", "hybrid"] },
-  { sourceType: "quickbooks", family: "saas", domains: ["finance"], modes: ["ingest", "hybrid"] }
+  { sourceType: "quickbooks", family: "saas", domains: ["finance"], modes: ["ingest", "hybrid"] },
+  { sourceType: "google_sheets", family: "saas", domains: ["marketing", "finance", "sales", "ops"], modes: ["ingest", "hybrid"] },
+  { sourceType: "excel_365", family: "saas", domains: ["marketing", "finance", "sales", "ops"], modes: ["ingest", "hybrid"] }
 ];
 
 const DEFAULT_QUERY_POLICY = {

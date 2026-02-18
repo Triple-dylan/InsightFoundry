@@ -19,6 +19,11 @@ function serializeState(state) {
     sourceConnectionRuns: state.sourceConnectionRuns,
     secretRefs: [...state.secretRefs.entries()],
     materializationRuns: state.materializationRuns,
+    mcpServers: state.mcpServers,
+    teamMembers: state.teamMembers,
+    workspaceFolders: state.workspaceFolders,
+    workspaceThreads: state.workspaceThreads,
+    workspaceComments: state.workspaceComments,
     installedSkills: state.installedSkills,
     skillDrafts: state.skillDrafts,
     skillRuns: state.skillRuns,
@@ -30,6 +35,7 @@ function serializeState(state) {
     reports: state.reports,
     reportSchedules: state.reportSchedules,
     agentJobs: state.agentJobs,
+    deviceCommandRequests: state.deviceCommandRequests,
     actionApprovals: state.actionApprovals,
     auditEvents: state.auditEvents,
     channelEvents: state.channelEvents,
@@ -52,6 +58,11 @@ function hydrateState(state, payload = {}) {
   state.sourceConnectionRuns = payload.sourceConnectionRuns ?? state.sourceConnectionRuns;
   state.secretRefs = new Map(payload.secretRefs ?? []);
   state.materializationRuns = payload.materializationRuns ?? state.materializationRuns;
+  state.mcpServers = payload.mcpServers ?? state.mcpServers;
+  state.teamMembers = payload.teamMembers ?? state.teamMembers;
+  state.workspaceFolders = payload.workspaceFolders ?? state.workspaceFolders;
+  state.workspaceThreads = payload.workspaceThreads ?? state.workspaceThreads;
+  state.workspaceComments = payload.workspaceComments ?? state.workspaceComments;
   state.installedSkills = payload.installedSkills ?? state.installedSkills;
   state.skillDrafts = payload.skillDrafts ?? state.skillDrafts;
   state.skillRuns = payload.skillRuns ?? state.skillRuns;
@@ -63,6 +74,7 @@ function hydrateState(state, payload = {}) {
   state.reports = payload.reports ?? state.reports;
   state.reportSchedules = payload.reportSchedules ?? state.reportSchedules;
   state.agentJobs = payload.agentJobs ?? state.agentJobs;
+  state.deviceCommandRequests = payload.deviceCommandRequests ?? state.deviceCommandRequests;
   state.actionApprovals = payload.actionApprovals ?? state.actionApprovals;
   state.auditEvents = payload.auditEvents ?? state.auditEvents;
   state.channelEvents = payload.channelEvents ?? state.channelEvents;

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { newId } from "./state.js";
+import { listSkillToolCatalog, runDeterministicSkillTool } from "./skill-compute.js";
 
 const SKILL_CATALOG = [
   {
@@ -8,7 +9,13 @@ const SKILL_CATALOG = [
     name: "Marketing Optimizer",
     description: "Optimize spend, ROAS, and lead volume with budget suggestions.",
     triggers: { intents: ["marketing_optimization", "campaign_analysis"], channels: ["web", "slack", "api"] },
-    tools: [{ id: "model.run", allow: true }, { id: "reports.generate", allow: true }, { id: "sources.sync", allow: true }],
+    tools: [
+      { id: "compute.data_quality_snapshot", allow: true },
+      { id: "compute.finance_snapshot", allow: true },
+      { id: "model.run", allow: true },
+      { id: "reports.generate", allow: true },
+      { id: "sources.sync", allow: true }
+    ],
     guardrails: { confidenceMin: 0.7, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 12000, tokenBudget: 3000, timeBudgetMs: 8000, killSwitch: false },
     prompts: { system: "Focus on marketing ROI and efficiency. Provide actionable recommendations." },
     schedules: [{ name: "Daily Marketing Digest", intervalMinutes: 1440 }]
@@ -19,10 +26,46 @@ const SKILL_CATALOG = [
     name: "Finance Forecast Analyst",
     description: "Generate cash-flow and profit forecasts with variance notes.",
     triggers: { intents: ["finance_forecast", "cashflow_analysis"], channels: ["web", "email", "api"] },
-    tools: [{ id: "model.run", allow: true }, { id: "reports.generate", allow: true }],
+    tools: [
+      { id: "compute.finance_snapshot", allow: true },
+      { id: "compute.data_quality_snapshot", allow: true },
+      { id: "model.run", allow: true },
+      { id: "reports.generate", allow: true }
+    ],
     guardrails: { confidenceMin: 0.75, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 25000, tokenBudget: 3000, timeBudgetMs: 10000, killSwitch: false },
     prompts: { system: "Prioritize financial clarity, risks, and near-term cash implications." },
     schedules: [{ name: "Daily Finance Pulse", intervalMinutes: 1440 }]
+  },
+  {
+    id: "deal-desk-analyst",
+    version: "1.0.0",
+    name: "Deal Desk Analyst",
+    description: "Run deterministic deal desk policy checks before recommendations.",
+    triggers: { intents: ["deal_review", "deal_desk", "pricing_approval"], channels: ["web", "slack", "api"] },
+    tools: [
+      { id: "compute.deal_desk_snapshot", allow: true },
+      { id: "compute.finance_snapshot", allow: true },
+      { id: "model.run", allow: true },
+      { id: "reports.generate", allow: true }
+    ],
+    guardrails: { confidenceMin: 0.72, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 30000, tokenBudget: 2500, timeBudgetMs: 9000, killSwitch: false },
+    prompts: { system: "Prioritize pricing policy, margin quality, discount governance, and approval readiness." },
+    schedules: [{ name: "Deal Desk Policy Scan", intervalMinutes: 360 }]
+  },
+  {
+    id: "data-quality-auditor",
+    version: "1.0.0",
+    name: "Data Quality Auditor",
+    description: "Score data quality and flag reliability risks before modeling.",
+    triggers: { intents: ["data_quality", "quality_audit", "reliability_check"], channels: ["web", "api"] },
+    tools: [
+      { id: "compute.data_quality_snapshot", allow: true },
+      { id: "compute.finance_snapshot", allow: true },
+      { id: "reports.generate", allow: true }
+    ],
+    guardrails: { confidenceMin: 0.7, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 5000, tokenBudget: 1800, timeBudgetMs: 6000, killSwitch: false },
+    prompts: { system: "Prefer deterministic data quality analysis. Only recommend actions with clear evidence." },
+    schedules: [{ name: "Daily Quality Audit", intervalMinutes: 1440 }]
   },
   {
     id: "crm-pipeline-nudger",
@@ -30,7 +73,11 @@ const SKILL_CATALOG = [
     name: "CRM Pipeline Nudger",
     description: "Detect funnel bottlenecks and recommend follow-up actions.",
     triggers: { intents: ["pipeline_health", "crm_anomaly"], channels: ["web", "slack", "telegram", "api"] },
-    tools: [{ id: "model.run", allow: true }, { id: "notify.owner", allow: true }],
+    tools: [
+      { id: "compute.data_quality_snapshot", allow: true },
+      { id: "model.run", allow: true },
+      { id: "notify.owner", allow: true }
+    ],
     guardrails: { confidenceMin: 0.65, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 5000, tokenBudget: 2000, timeBudgetMs: 6000, killSwitch: false },
     prompts: { system: "Focus on stage conversion risks and operator tasks." },
     schedules: [{ name: "Pipeline Alert Check", intervalMinutes: 240 }]
@@ -44,6 +91,11 @@ function manifestSignature(manifest) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function isKnownToolId(toolId) {
+  const known = new Set(listSkillToolCatalog().map((item) => item.id));
+  return known.has(toolId) || String(toolId).startsWith("custom.");
 }
 
 export function validateSkillManifest(manifest) {
@@ -67,6 +119,13 @@ export function validateSkillManifest(manifest) {
     err.statusCode = 400;
     throw err;
   }
+
+  const unknownTool = manifest.tools.find((tool) => !tool?.id || !isKnownToolId(tool.id));
+  if (unknownTool) {
+    const err = new Error(`Skill manifest references unsupported tool '${unknownTool.id}'`);
+    err.statusCode = 400;
+    throw err;
+  }
 }
 
 function catalogSkillById(skillId) {
@@ -75,6 +134,10 @@ function catalogSkillById(skillId) {
 
 export function listSkillCatalog() {
   return SKILL_CATALOG;
+}
+
+export function listSkillTools() {
+  return listSkillToolCatalog();
 }
 
 export function installSkillPack(state, tenant, payload = {}) {
@@ -130,6 +193,52 @@ export function setSkillActivation(state, tenantId, skillId, active) {
   skill.active = active;
   skill.updatedAt = new Date().toISOString();
   if (active) {
+    for (const candidate of state.installedSkills) {
+      if (candidate.tenantId === tenantId && candidate.baseId === skill.baseId && candidate.id !== skill.id) {
+        candidate.active = false;
+        candidate.updatedAt = new Date().toISOString();
+      }
+    }
+  }
+
+  return skill;
+}
+
+function mergePatch(target, patch = {}) {
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === "object" && !Array.isArray(value) && target[key] && typeof target[key] === "object") {
+      mergePatch(target[key], value);
+    } else {
+      target[key] = value;
+    }
+  }
+  return target;
+}
+
+export function patchInstalledSkillPack(state, tenantId, skillId, payload = {}) {
+  const skill = state.installedSkills.find((item) => item.tenantId === tenantId && item.id === skillId);
+  if (!skill) {
+    const err = new Error(`Installed skill '${skillId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (payload.manifest && typeof payload.manifest === "object") {
+    const manifest = clone(skill.manifest);
+    mergePatch(manifest, payload.manifest);
+    validateSkillManifest(manifest);
+    skill.manifest = manifest;
+    skill.version = manifest.version;
+    skill.baseId = manifest.id;
+    skill.signature = manifestSignature(manifest);
+  }
+
+  if (typeof payload.active === "boolean") {
+    skill.active = payload.active;
+  }
+  skill.updatedAt = new Date().toISOString();
+
+  if (skill.active) {
     for (const candidate of state.installedSkills) {
       if (candidate.tenantId === tenantId && candidate.baseId === skill.baseId && candidate.id !== skill.id) {
         candidate.active = false;
@@ -260,25 +369,54 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
 
   const guardrailChecks = assertSkillSafety(tenant, selected, payload);
 
-  const baseId = selected.baseId;
-  const artifacts = {};
-  if (adapters.runModelTask) {
-    if (baseId === "marketing-optimizer") {
-      artifacts.model = adapters.runModelTask(state, tenant, { objective: "forecast", outputMetricIds: ["revenue"], horizonDays: 7 });
-    } else if (baseId === "finance-forecast-analyst") {
-      artifacts.model = adapters.runModelTask(state, tenant, { objective: "forecast", outputMetricIds: ["profit"], horizonDays: 7 });
-    } else {
-      artifacts.model = adapters.runModelTask(state, tenant, { objective: "anomaly", outputMetricIds: ["leads"], horizonDays: 7 });
+  const allowedTools = selected.manifest.tools.filter((tool) => tool.allow).map((tool) => tool.id);
+  const requestedTools = (payload.requestedTools ?? []).length ? payload.requestedTools : allowedTools;
+  const deterministicOutputs = {};
+  const modelRuns = [];
+  const reportRuns = [];
+
+  for (const toolId of requestedTools) {
+    if (!allowedTools.includes(toolId)) continue;
+    const deterministic = runDeterministicSkillTool(state, tenant, toolId, payload);
+    if (deterministic) {
+      deterministicOutputs[toolId] = deterministic;
+      continue;
+    }
+    if (toolId === "model.run" && adapters.runModelTask) {
+      const objective = /anomaly|quality/i.test(String(payload.intent ?? "")) ? "anomaly" : "forecast";
+      const metricId = selected.baseId === "finance-forecast-analyst"
+        ? "profit"
+        : selected.baseId === "deal-desk-analyst"
+          ? "revenue"
+          : "revenue";
+      const model = adapters.runModelTask(state, tenant, {
+        objective,
+        outputMetricIds: [metricId],
+        horizonDays: Number(payload.horizonDays ?? 7),
+        provider: payload.provider
+      });
+      modelRuns.push(model);
+    }
+    if (toolId === "reports.generate" && adapters.generateReport && payload.generateReport) {
+      const report = adapters.generateReport(state, tenant, {
+        title: payload.reportTitle ?? `${selected.manifest.name} Auto Report`,
+        channels: payload.channels ?? ["email"],
+        metricIds: payload.metricIds ?? ["revenue", "profit", "spend"],
+        summaryPreface: payload.summaryPreface
+      });
+      reportRuns.push(report);
     }
   }
 
-  if (adapters.generateReport && payload.generateReport) {
-    artifacts.report = adapters.generateReport(state, tenant, {
-      title: payload.reportTitle ?? `${selected.manifest.name} Auto Report`,
-      channels: payload.channels ?? ["email"],
-      metricIds: payload.metricIds ?? ["revenue", "profit", "spend"]
-    });
-  }
+  const primaryModel = modelRuns[0] ?? null;
+  const qualitySnapshot = deterministicOutputs["compute.data_quality_snapshot"]?.summary ?? null;
+  const artifacts = {
+    deterministicOutputs,
+    model: primaryModel,
+    models: modelRuns,
+    report: reportRuns[0] ?? null,
+    reports: reportRuns
+  };
 
   const run = {
     id: newId("skill_run"),
@@ -288,7 +426,7 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
     channel: payload.channel ?? "web",
     intent: payload.intent ?? "unspecified",
     status: "completed",
-    confidence: artifacts.model?.insight?.confidence ?? 0.7,
+    confidence: primaryModel?.insight?.confidence ?? 0.7,
     artifacts,
     trace: {
       routing: {
@@ -298,10 +436,18 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
         intent: payload.intent ?? "unspecified"
       },
       tools: {
-        requested: payload.requestedTools ?? [],
-        allowed: selected.manifest.tools.filter((tool) => tool.allow).map((tool) => tool.id)
+        requested: requestedTools,
+        allowed: allowedTools,
+        deterministicExecuted: Object.keys(deterministicOutputs)
       },
       guardrails: guardrailChecks
+    },
+    reasoningHints: {
+      deterministicFirst: true,
+      tokenEfficiency: {
+        rawRowsAvoided: qualitySnapshot ? qualitySnapshot.totalRows : 0,
+        precomputedBlocks: Object.keys(deterministicOutputs).length
+      }
     },
     createdAt: new Date().toISOString()
   };
@@ -319,6 +465,16 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
       check: "confidence_threshold",
       status: "pass",
       detail: `${run.confidence} meets threshold`
+    });
+  }
+
+  if (qualitySnapshot && Number(qualitySnapshot.qualityScore ?? 1) < 0.7) {
+    run.status = "completed_with_warning";
+    run.warning = run.warning ?? "low_data_quality";
+    run.trace.guardrails.push({
+      check: "data_quality",
+      status: "warn",
+      detail: `quality score ${Number(qualitySnapshot.qualityScore).toFixed(2)} below 0.70`
     });
   }
 

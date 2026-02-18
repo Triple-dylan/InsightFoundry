@@ -270,17 +270,45 @@
         font-size: 13px;
         background: rgba(255, 255, 255, 0.74);
       }
+      .msg .msg-meta {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
       .msg.user {
         background: rgba(228, 248, 240, 0.82);
         border-color: rgba(113, 161, 144, 0.45);
       }
       .composer {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: auto 1fr auto;
         gap: 8px;
         padding: 10px;
         border-top: 1px solid var(--line);
         background: rgba(249, 254, 251, 0.75);
+      }
+      .chat-toolbar {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(248, 252, 255, 0.84);
+      }
+      .attachment-tray {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 10px 8px;
+      }
+      .attachment-pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 4px 8px;
+        font-size: 11px;
+        background: rgba(255, 255, 255, 0.84);
       }
       textarea,
       input,
@@ -334,6 +362,17 @@
         border-radius: 10px;
         padding: 8px;
         font-size: 12px;
+      }
+      .progress-track {
+        width: 100%;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(169, 184, 204, 0.28);
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, rgba(15, 118, 110, 0.9), rgba(59, 130, 246, 0.8));
       }
       .settings-layout {
         display: grid;
@@ -435,31 +474,33 @@
 
       /* Workspace V4: codex-like hierarchy */
       :root {
-        --bg: #f4f6f8;
-        --panel: #ffffff;
-        --line: #d8dde3;
-        --line-strong: #c7ced6;
-        --text: #111827;
-        --muted: #5b6472;
-        --accent: #2563eb;
-        --accent-deep: #1d4ed8;
-        --accent-soft: #e8efff;
-        --shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
-        --glass-blur: 0px;
-        --radius-lg: 12px;
+        --bg: radial-gradient(circle at 8% 12%, rgba(181, 223, 240, 0.4) 0%, transparent 36%),
+          radial-gradient(circle at 88% 16%, rgba(199, 232, 225, 0.42) 0%, transparent 38%),
+          linear-gradient(165deg, #eef3f8 0%, #f8fbff 44%, #e8eff8 100%);
+        --panel: rgba(255, 255, 255, 0.58);
+        --line: rgba(126, 145, 171, 0.35);
+        --line-strong: rgba(96, 117, 146, 0.48);
+        --text: #0f172a;
+        --muted: #475569;
+        --accent: #0f766e;
+        --accent-deep: #0f5e59;
+        --accent-soft: rgba(204, 248, 241, 0.72);
+        --shadow: 0 18px 42px rgba(15, 23, 42, 0.12);
+        --glass-blur: 20px;
+        --radius-lg: 14px;
       }
       body {
         background: var(--bg);
       }
       body::before,
       body::after {
-        display: none;
+        display: block;
       }
       .topbar {
         height: 56px;
-        background: #ffffff;
+        background: rgba(255, 255, 255, 0.62);
         border-color: var(--line);
-        backdrop-filter: none;
+        backdrop-filter: blur(var(--glass-blur));
       }
       .brand-dot {
         width: 10px;
@@ -472,8 +513,8 @@
       .chat,
       .context-body,
       .preview-panel {
-        background: #ffffff;
-        backdrop-filter: none;
+        background: var(--panel);
+        backdrop-filter: blur(var(--glass-blur));
       }
       .workspace.codex-layout {
         grid-template-columns: 240px minmax(0, 1fr) 360px;
@@ -489,10 +530,17 @@
       .workspace.codex-layout.left-collapsed.right-collapsed {
         grid-template-columns: minmax(0, 1fr);
       }
+      .workspace.codex-layout.focus-mode {
+        grid-template-columns: minmax(0, 1fr);
+      }
       .workspace.codex-layout.left-collapsed .left-rail {
         display: none;
       }
       .workspace.codex-layout.right-collapsed .right-rail {
+        display: none;
+      }
+      .workspace.codex-layout.focus-mode .left-rail,
+      .workspace.codex-layout.focus-mode .right-rail {
         display: none;
       }
       .workspace.codex-layout .left-rail,
@@ -541,11 +589,11 @@
         border-color: #dfe4ea;
       }
       .workspace.codex-layout .msg.user {
-        background: #eef4ff;
-        border-color: #c9dafc;
+        background: rgba(222, 245, 240, 0.9);
+        border-color: rgba(92, 155, 139, 0.38);
       }
       .workspace.codex-layout .composer {
-        background: #ffffff;
+        background: rgba(255, 255, 255, 0.62);
       }
       .workspace.codex-layout .composer textarea {
         min-height: 56px;
@@ -563,6 +611,10 @@
       }
       .workspace.codex-layout .run-builder-compact h3 {
         margin-bottom: 10px;
+      }
+      .item.clickable.active {
+        border-color: rgba(80, 131, 117, 0.62);
+        background: rgba(223, 247, 240, 0.78);
       }
       @media (prefers-reduced-motion: reduce) {
         * {
@@ -609,6 +661,7 @@
             <button data-route-target="runs">Runs</button>
           </div>
           <div class="nav">
+            <button id="toggleFocusModeBtn" type="button">Focus</button>
             <button id="toggleLeftRailBtn" type="button">Hide Left</button>
             <button id="toggleRightRailBtn" type="button">Hide Right</button>
           </div>
@@ -621,44 +674,65 @@
           <div class="workspace codex-layout">
             <aside class="left-rail panel">
               <div class="card">
-                <h3>Actions</h3>
+                <h3>Folders</h3>
+                <div class="subtle">Shared workspace folders</div>
+                <div class="toolbar" style="margin-top:8px">
+                  <input id="newFolderNameInput" placeholder="New folder name" />
+                  <button id="newFolderBtn" type="button">Create</button>
+                </div>
+                <div id="folderList" class="list" style="margin-top:8px"></div>
+              </div>
+              <div class="card">
+                <h3>Threads</h3>
+                <div class="subtle">Shared chat feeds inside selected folder</div>
+                <div class="toolbar" style="margin-top:8px">
+                  <input id="newThreadTitleInput" placeholder="New thread title" />
+                  <button id="newThreadBtn" type="button">Create</button>
+                </div>
+                <div id="threadList" class="list" style="margin-top:8px"></div>
+              </div>
+              <div class="card">
+                <h3>Prompt Library</h3>
+                <div class="list" id="savedPromptList"></div>
+                <div id="runContextList" hidden></div>
+              </div>
+            </aside>
+
+            <section class="center panel">
+              <div class="card doc-header">
+                <div class="subtle mono">Workspace / Shared Copilot</div>
+                <h2 style="margin:4px 0 2px">Shared Data Thread</h2>
+                <div class="subtle">Chat-first analysis workspace with foldered threads, comments, and run-aware context.</div>
+              </div>
+              <div class="commandbar">
+                <form id="commandForm" class="command-line">
+                  <kbd>cmd+k</kbd>
+                  <input id="commandInput" placeholder="new run | execute run | open settings channels | open settings team" />
+                  <button type="submit">Run</button>
+                </form>
                 <div class="toolbar">
                   <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
                   <button id="quickExecuteBtn" type="button">Execute</button>
                   <button id="quickDeliverBtn" type="button">Deliver</button>
                   <button id="quickSettingsBtn" type="button">Settings</button>
                 </div>
-                <form id="commandForm" class="command-line" style="margin-top:8px">
-                  <kbd>cmd+k</kbd>
-                  <input id="commandInput" placeholder="new run | execute run | open settings connections" />
-                  <button type="submit">Run</button>
-                </form>
-              </div>
-              <div class="card">
-                <h3>Analyses</h3>
-                <div class="subtle">Recent runs</div>
-                <div id="runContextList" class="list"></div>
-              </div>
-              <div class="card">
-                <h3>Prompt Library</h3>
-                <div class="list" id="savedPromptList"></div>
-                <div id="threadList" hidden></div>
-              </div>
-            </aside>
-
-            <section class="center panel">
-              <div class="card doc-header">
-                <div class="subtle mono">Workspace / Data Copilot</div>
-                <h2 style="margin:4px 0 2px">Ask, Analyze, Deliver</h2>
-                <div class="subtle">Codex-style execution with Notion-like context blocks grounded in your run data.</div>
               </div>
               <div class="card" id="dataContextStrip"></div>
-              <div id="onboardingChecklist" class="onboard" style="display:none"></div>
-              <div class="kpis" id="kpiGrid" style="display:none"></div>
+              <div class="kpis" id="kpiGrid" hidden></div>
               <section class="chat">
+                <div class="chat-toolbar">
+                  <label class="subtle">Model</label>
+                  <select id="chatModelProfileSelect"></select>
+                  <button id="chatOpenModelsBtn" type="button">Models</button>
+                  <button id="chatOpenChannelsBtn" type="button">Channels</button>
+                </div>
+                <div class="toolbar" id="chatQuickActionBar" style="padding:8px 10px; border-bottom:1px solid var(--line);"></div>
                 <div class="thread" id="thread"></div>
+                <div class="attachment-tray" id="chatAttachments"></div>
                 <form id="chatForm" class="composer">
+                  <button type="button" id="attachFilesBtn">Attach</button>
                   <textarea id="chatInput" placeholder="Ask for a revenue forecast, anomaly scan, root-cause breakdown, or action plan from current run context"></textarea>
+                  <input id="chatFileInput" type="file" multiple hidden />
                   <button type="submit" class="primary">Send</button>
                 </form>
               </section>
@@ -668,6 +742,20 @@
               <div class="card">
                 <h4>Run Health</h4>
                 <div class="badges" id="runHealthBadges"></div>
+                <div id="onboardingChecklist" class="onboard" style="margin-top:8px"></div>
+              </div>
+              <div class="card">
+                <h4>Agent Cowork</h4>
+                <div class="subtle">Run folder-scoped agent tasks and request device commands with approval.</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label class="full">Cowork Prompt<input id="agentCoworkPrompt" placeholder="Summarize this thread and propose next steps." /></label>
+                  <button id="runCoworkAgentBtn" type="button">Run In Thread</button>
+                </div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label>Command<input id="deviceCommandInput" placeholder="pwd" /></label>
+                  <label>Args<input id="deviceCommandArgsInput" placeholder="-la" /></label>
+                  <button id="requestDeviceCommandBtn" type="button">Request Command</button>
+                </div>
               </div>
               <div class="card stepper run-builder-compact">
                 <h3>Run Setup</h3>
@@ -698,6 +786,7 @@
                 <button class="tab" data-context-tab="evidence">Evidence</button>
                 <button class="tab" data-context-tab="actions">Actions</button>
                 <button class="tab" data-context-tab="artifacts">Artifacts</button>
+                <button class="tab" data-context-tab="comments">Comments</button>
               </div>
               <div class="context-body" id="contextBody"></div>
             </aside>
@@ -707,7 +796,11 @@
         <section id="route-settings" class="route">
           <div class="settings-layout panel">
             <aside class="settings-nav">
-              <button class="tab active" data-settings-tab="general">General</button>
+              <button class="tab active" data-settings-tab="setup">Setup</button>
+              <button class="tab" data-settings-tab="general">General</button>
+              <button class="tab" data-settings-tab="team">Team</button>
+              <button class="tab" data-settings-tab="mcp-agents">MCP & Agents</button>
+              <button class="tab" data-settings-tab="integrations">Integrations</button>
               <button class="tab" data-settings-tab="connections">Connections</button>
               <button class="tab" data-settings-tab="credentials">Credentials</button>
               <button class="tab" data-settings-tab="models">Models</button>
@@ -719,7 +812,11 @@
             </aside>
 
             <section class="settings-content">
-              <div id="settings-general" class="settings-section active card"></div>
+              <div id="settings-setup" class="settings-section active card"></div>
+              <div id="settings-general" class="settings-section card"></div>
+              <div id="settings-team" class="settings-section card"></div>
+              <div id="settings-mcp-agents" class="settings-section card"></div>
+              <div id="settings-integrations" class="settings-section card"></div>
               <div id="settings-connections" class="settings-section card"></div>
               <div id="settings-credentials" class="settings-section card"></div>
               <div id="settings-models" class="settings-section card"></div>
@@ -749,17 +846,31 @@
       const appState = {
         tenantId: demoTenantId,
         route: "workspace",
-        settingsTab: "general",
+        settingsTab: "setup",
         contextTab: "summary",
         leftRailCollapsed: false,
         rightRailCollapsed: false,
+        focusMode: false,
         activeRunId: null,
         settings: null,
         connections: [],
         profiles: [],
         reportTypes: [],
         skillsInstalled: [],
+        skillTools: [],
         skillDrafts: [],
+        integrationCatalog: [],
+        mcpProviders: [],
+        mcpServers: [],
+        agentJobs: [],
+        deviceCommands: [],
+        team: [],
+        folders: [],
+        threads: [],
+        commentsByThread: {},
+        activeFolderId: null,
+        activeThreadId: null,
+        pendingAttachments: [],
         runs: [],
         channelEvents: [],
         sourceRunHistoryByConnection: {},
@@ -833,25 +944,39 @@
       function applyWorkspaceLayout() {
         const workspace = document.querySelector(".workspace.codex-layout");
         if (!workspace) return;
+        workspace.classList.toggle("focus-mode", appState.focusMode);
         workspace.classList.toggle("left-collapsed", appState.leftRailCollapsed);
         workspace.classList.toggle("right-collapsed", appState.rightRailCollapsed);
+        const focusBtn = document.getElementById("toggleFocusModeBtn");
         const leftBtn = document.getElementById("toggleLeftRailBtn");
         const rightBtn = document.getElementById("toggleRightRailBtn");
+        if (focusBtn) {
+          focusBtn.textContent = appState.focusMode ? "Exit Focus" : "Focus";
+          focusBtn.classList.toggle("active", appState.focusMode);
+          focusBtn.disabled = appState.route !== "workspace";
+        }
         if (leftBtn) {
           leftBtn.textContent = appState.leftRailCollapsed ? "Show Left" : "Hide Left";
-          leftBtn.disabled = appState.route !== "workspace";
+          leftBtn.disabled = appState.route !== "workspace" || appState.focusMode;
         }
         if (rightBtn) {
           rightBtn.textContent = appState.rightRailCollapsed ? "Show Right" : "Hide Right";
-          rightBtn.disabled = appState.route !== "workspace";
+          rightBtn.disabled = appState.route !== "workspace" || appState.focusMode;
         }
       }
 
       function appendMessage(text, role = "ai") {
         const thread = document.getElementById("thread");
+        if (!thread) return;
         const div = document.createElement("div");
         div.className = `msg ${role}`;
-        div.textContent = text;
+        const meta = document.createElement("span");
+        meta.className = "msg-meta";
+        meta.textContent = role === "user" ? "You" : "InsightFoundry";
+        const body = document.createElement("div");
+        body.textContent = text;
+        div.appendChild(meta);
+        div.appendChild(body);
         thread.appendChild(div);
         thread.scrollTop = thread.scrollHeight;
       }
@@ -888,7 +1013,9 @@
       }
 
       function selectedModelProfile() {
-        return appState.profiles.find((item) => item.id === document.getElementById("runModelSelect")?.value)
+        const chatChoice = document.getElementById("chatModelProfileSelect")?.value;
+        return appState.profiles.find((item) => item.id === chatChoice)
+          || appState.profiles.find((item) => item.id === document.getElementById("runModelSelect")?.value)
           || appState.profiles.find((item) => item.active)
           || null;
       }
@@ -907,26 +1034,179 @@
         });
       }
 
+      function currentFolder() {
+        return appState.folders.find((item) => item.id === appState.activeFolderId) || null;
+      }
+
+      function currentThread() {
+        return appState.threads.find((item) => item.id === appState.activeThreadId) || null;
+      }
+
+      function renderFolderList() {
+        const box = document.getElementById("folderList");
+        box.innerHTML = "";
+        if (!appState.folders.length) {
+          box.innerHTML = `<div class="item">No folders yet</div>`;
+          return;
+        }
+        appState.folders.forEach((folder) => {
+          const button = document.createElement("button");
+          button.className = `item clickable ${folder.id === appState.activeFolderId ? "active" : ""}`;
+          button.innerHTML = `<div><strong>${folder.name}</strong></div><div class="subtle">${folder.description || ""}</div>`;
+          button.onclick = async () => {
+            appState.activeFolderId = folder.id;
+            const threadIds = appState.threads.filter((item) => item.folderId === folder.id).map((item) => item.id);
+            if (!threadIds.includes(appState.activeThreadId)) {
+              appState.activeThreadId = threadIds[0] || null;
+            }
+            await refreshThreadComments();
+            renderFolderList();
+            renderThreadList();
+            renderSharedThread();
+            renderContextPanel();
+          };
+          box.appendChild(button);
+        });
+      }
+
       function renderThreadList() {
         const box = document.getElementById("threadList");
         box.innerHTML = "";
-        const items = [
-          "Current analysis context",
-          "Report planning notes",
-          "Data quality checks"
-        ];
-        items.forEach((item) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.textContent = item;
-          box.appendChild(el);
+        const folderThreads = appState.threads.filter((item) => item.folderId === appState.activeFolderId);
+        if (!folderThreads.length) {
+          box.innerHTML = `<div class="item">No threads in this folder</div>`;
+          return;
+        }
+        folderThreads.forEach((thread) => {
+          const button = document.createElement("button");
+          button.className = `item clickable ${thread.id === appState.activeThreadId ? "active" : ""}`;
+          const count = (appState.commentsByThread[thread.id] || []).length;
+          button.innerHTML = `
+            <div><strong>${thread.title}</strong></div>
+            <div class="subtle">${count} comments${thread.lastMessageAt ? ` • ${new Date(thread.lastMessageAt).toLocaleString()}` : ""}</div>
+          `;
+          button.onclick = async () => {
+            appState.activeThreadId = thread.id;
+            await refreshThreadComments();
+            renderThreadList();
+            renderSharedThread();
+            renderContextPanel();
+          };
+          box.appendChild(button);
         });
+      }
+
+      function renderSharedThread() {
+        const threadEl = document.getElementById("thread");
+        if (!threadEl) return;
+        const thread = currentThread();
+        if (!thread) {
+          threadEl.innerHTML = `<div class="item">Select a thread or create one from the left rail.</div>`;
+          return;
+        }
+        const comments = appState.commentsByThread[thread.id] || [];
+        if (!comments.length) {
+          threadEl.innerHTML = `<div class="item">No messages yet in "${thread.title}".</div>`;
+          return;
+        }
+        threadEl.innerHTML = comments.map((comment) => `
+          <div class="msg ${comment.role === "user" ? "user" : "ai"}">
+            <span class="msg-meta">${comment.authorName} • ${new Date(comment.createdAt).toLocaleString()}</span>
+            <div>${comment.body}</div>
+          </div>
+        `).join("");
+        threadEl.scrollTop = threadEl.scrollHeight;
+      }
+
+      function renderChatModelSelect() {
+        const select = document.getElementById("chatModelProfileSelect");
+        if (!select) return;
+        const active = selectedModelProfile();
+        fillSelect("chatModelProfileSelect", appState.profiles, "id", "name", true, "Auto (active profile)", active?.id ?? "");
+      }
+
+      function renderAttachmentTray() {
+        const tray = document.getElementById("chatAttachments");
+        if (!tray) return;
+        if (!appState.pendingAttachments.length) {
+          tray.innerHTML = "";
+          return;
+        }
+        tray.innerHTML = appState.pendingAttachments.map((file, idx) => `
+          <button type="button" class="attachment-pill" data-remove-attachment="${idx}">
+            ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB) ×
+          </button>
+        `).join("");
+        tray.querySelectorAll("[data-remove-attachment]").forEach((btn) => {
+          btn.onclick = () => {
+            const idx = Number(btn.dataset.removeAttachment);
+            appState.pendingAttachments = appState.pendingAttachments.filter((_, i) => i !== idx);
+            renderAttachmentTray();
+          };
+        });
+      }
+
+      function renderChatQuickActions() {
+        const bar = document.getElementById("chatQuickActionBar");
+        if (!bar) return;
+        const prompts = [
+          "Summarize current data quality and gaps.",
+          "Run a 14 day revenue forecast and explain confidence.",
+          "Generate actions for leadership this week."
+        ];
+        bar.innerHTML = prompts.map((prompt, idx) => `<button type="button" data-chat-quick="${idx}">${prompt}</button>`).join("");
+        bar.querySelectorAll("[data-chat-quick]").forEach((btn) => {
+          btn.onclick = () => {
+            const prompt = prompts[Number(btn.dataset.chatQuick)];
+            document.getElementById("chatInput").value = prompt;
+            document.getElementById("chatInput").focus();
+          };
+        });
+      }
+
+      async function applyStarterPack() {
+        try {
+          const hasSource = Array.isArray(appState.connections) && appState.connections.length > 0;
+          if (!hasSource) {
+            await api("/v1/integrations/quick-add", {
+              method: "POST",
+              body: JSON.stringify({
+                integrationKey: "google_ads",
+                authRef: "starter_demo_token",
+                periodDays: 21,
+                runInitialSync: true
+              })
+            });
+          }
+
+          const hasReport = Array.isArray(appState.reportTypes) && appState.reportTypes.length > 0;
+          if (!hasReport) {
+            await api("/v1/reports/types", {
+              method: "POST",
+              body: JSON.stringify({
+                name: "Starter Executive Brief",
+                sections: ["kpi_snapshot", "trend_chart", "narrative", "actions"],
+                defaultChannels: ["email"],
+                defaultFormat: "html"
+              })
+            });
+          }
+
+          await loadAll();
+          if (!appState.activeRunId) {
+            await createDraftRunFromBuilder();
+          }
+          appendMessage("Starter pack applied. You can execute a run now.");
+        } catch (error) {
+          appendMessage(`Starter pack error: ${error.message}`);
+        }
       }
 
       function renderOnboarding() {
         const checklist = appState.settings?.checklist || {};
         const done = Object.values(checklist).filter(Boolean).length;
         const total = Object.keys(checklist).length || 4;
+        const pct = total ? Math.round((done / total) * 100) : 0;
         const nextStep = !checklist.connectionsConfigured
           ? "Open Settings > Connections to link your first source."
           : !checklist.modelProfileConfigured
@@ -937,13 +1217,32 @@
                 ? "Open Settings > Channels to configure delivery."
                 : "Checklist complete. Create and execute your first guided run.";
         document.getElementById("onboardingChecklist").innerHTML = `
-          <strong>Onboarding Checklist</strong> (${done}/${total})<br/>
-          Connections: ${checklist.connectionsConfigured ? "Done" : "Pending"} | 
-          Model Profile: ${checklist.modelProfileConfigured ? "Done" : "Pending"} | 
-          Report Type: ${checklist.reportTypeConfigured ? "Done" : "Pending"} | 
-          Channels: ${checklist.channelsConfigured ? "Done" : "Pending"}<br/>
+          <strong>Onboarding Checklist</strong> (${done}/${total})
+          <div class="progress-track" style="margin-top:6px"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <div class="subtle" style="margin-top:6px">Connections: ${checklist.connectionsConfigured ? "Done" : "Pending"} | 
+          Model: ${checklist.modelProfileConfigured ? "Done" : "Pending"} | 
+          Report: ${checklist.reportTypeConfigured ? "Done" : "Pending"} | 
+          Channels: ${checklist.channelsConfigured ? "Done" : "Pending"}</div>
+          <div class="toolbar" style="margin-top:8px">
+            <button type="button" id="onboardGoIntegrationsBtn">Connect Data</button>
+            <button type="button" id="onboardGoModelsBtn">Choose Model</button>
+            <button type="button" id="onboardGoChannelsBtn">Delivery</button>
+            <button type="button" id="onboardStarterPackBtn" class="primary">Load Starter Pack</button>
+          </div>
           <span class="subtle">${nextStep}</span>
         `;
+        const goIntegrations = document.getElementById("onboardGoIntegrationsBtn");
+        if (goIntegrations) goIntegrations.onclick = () => openSettingsTab("integrations");
+        const goModels = document.getElementById("onboardGoModelsBtn");
+        if (goModels) goModels.onclick = () => openSettingsTab("models");
+        const goChannels = document.getElementById("onboardGoChannelsBtn");
+        if (goChannels) goChannels.onclick = () => openSettingsTab("channels");
+        const starterPack = document.getElementById("onboardStarterPackBtn");
+        if (starterPack) {
+          starterPack.onclick = async () => {
+            await applyStarterPack();
+          };
+        }
       }
 
       function renderRunContextList() {
@@ -997,6 +1296,8 @@
         const box = document.getElementById("dataContextStrip");
         if (!box) return;
         const run = currentRun();
+        const folder = currentFolder();
+        const thread = currentThread();
         const source = appState.connections.find((item) => item.id === (run?.sourceConnectionId || document.getElementById("runSourceSelect")?.value)) || null;
         const model = appState.profiles.find((item) => item.id === (run?.modelProfileId || document.getElementById("runModelSelect")?.value)) || null;
         const reportType = appState.reportTypes.find((item) => item.id === (run?.reportTypeId || document.getElementById("runReportSelect")?.value)) || null;
@@ -1005,6 +1306,8 @@
         box.innerHTML = `
           <div class="subtle mono">DATA CONTEXT</div>
           <div class="context-grid" style="margin-top:8px">
+            <div class="context-kv"><div class="subtle">Folder</div><div>${folder?.name || "None"}</div></div>
+            <div class="context-kv"><div class="subtle">Thread</div><div>${thread?.title || "None"}</div></div>
             <div class="context-kv"><div class="subtle">Source</div><div>${source?.sourceType || "Not selected"}</div></div>
             <div class="context-kv"><div class="subtle">Model</div><div>${model?.name || "Not selected"}</div></div>
             <div class="context-kv"><div class="subtle">Report</div><div>${reportType?.name || "Not selected"}</div></div>
@@ -1073,13 +1376,106 @@
 
         if (tab === "actions") {
           const actions = appState.pendingActions || [];
-          body.innerHTML = `<h4>Actions</h4>${actions.length ? actions.map((a) => `<div class="item">${a.actionType} (${a.policyDecision})</div>`).join("") : `<div class="item">No pending actions</div>`}`;
+          const devicePending = (appState.deviceCommands || []).filter((item) => item.status === "pending_approval");
+          body.innerHTML = `
+            <h4>Actions</h4>
+            <div class="subtle">Model/insight actions + device command approvals</div>
+            <div class="list" style="margin-top:8px">
+              ${actions.length
+                ? actions.map((a) => `<div class="item">${a.actionType} (${a.policyDecision})</div>`).join("")
+                : `<div class="item">No pending model actions</div>`}
+            </div>
+            <h4 style="margin-top:10px">Device Command Approvals</h4>
+            <div class="list">
+              ${devicePending.length
+                ? devicePending.map((request) => `
+                    <div class="item">
+                      <div><strong>${request.command}</strong> ${request.args?.length ? request.args.join(" ") : ""}</div>
+                      <div class="subtle">${request.policyReason} • ${new Date(request.createdAt).toLocaleString()}</div>
+                      <div class="toolbar" style="margin-top:6px">
+                        <button data-approve-device-command="${request.id}">Approve & Execute</button>
+                        <button data-reject-device-command="${request.id}">Reject</button>
+                      </div>
+                    </div>
+                  `).join("")
+                : `<div class="item">No pending device command approvals</div>`}
+            </div>
+          `;
+
+          body.querySelectorAll("[data-approve-device-command]").forEach((btn) => {
+            btn.onclick = async () => {
+              await api(`/v1/agents/device-commands/${encodeURIComponent(btn.dataset.approveDeviceCommand)}/approve`, {
+                method: "POST",
+                body: JSON.stringify({
+                  decision: "approve",
+                  executeNow: true
+                })
+              });
+              await loadAll();
+              setContextTab("actions");
+              appendMessage("Device command approved and executed.");
+            };
+          });
+          body.querySelectorAll("[data-reject-device-command]").forEach((btn) => {
+            btn.onclick = async () => {
+              await api(`/v1/agents/device-commands/${encodeURIComponent(btn.dataset.rejectDeviceCommand)}/approve`, {
+                method: "POST",
+                body: JSON.stringify({
+                  decision: "reject",
+                  executeNow: false
+                })
+              });
+              await loadAll();
+              setContextTab("actions");
+              appendMessage("Device command rejected.");
+            };
+          });
         }
 
         if (tab === "artifacts") {
           body.innerHTML = run
             ? `<h4>Artifacts</h4><div class="item">Insight: ${run.artifacts?.insightId || "none"}</div><div class="item">Report: ${run.artifacts?.reportId || "none"}</div><div class="item">Channels: ${(run.artifacts?.channelEventIds || []).length}</div>`
             : `<h4>Artifacts</h4><div class="item">No run selected</div>`;
+        }
+
+        if (tab === "comments") {
+          const thread = currentThread();
+          const comments = thread ? (appState.commentsByThread[thread.id] || []) : [];
+          body.innerHTML = `
+            <h4>Thread Comments</h4>
+            <div class="subtle">${thread ? thread.title : "No thread selected"}</div>
+            <div class="list" style="margin-top:8px">
+              ${comments.length ? comments.slice(-10).map((comment) => `
+                <div class="item">
+                  <div><strong>${comment.authorName}</strong> <span class="subtle">${new Date(comment.createdAt).toLocaleString()}</span></div>
+                  <div>${comment.body}</div>
+                </div>
+              `).join("") : `<div class="item">No comments yet</div>`}
+            </div>
+            <div class="toolbar" style="margin-top:8px">
+              <input id="quickCommentInput" placeholder="Leave a comment in this thread" />
+              <button id="quickCommentBtn" type="button">Comment</button>
+            </div>
+          `;
+          const quickCommentBtn = document.getElementById("quickCommentBtn");
+          if (quickCommentBtn) {
+            quickCommentBtn.onclick = async () => {
+              const quickCommentInput = document.getElementById("quickCommentInput");
+              const text = quickCommentInput?.value?.trim() ?? "";
+              if (!text || !thread) return;
+              await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
+                method: "POST",
+                body: JSON.stringify({
+                  authorName: "ui-user",
+                  role: "comment",
+                  body: text
+                })
+              });
+              quickCommentInput.value = "";
+              await loadAll();
+              setContextTab("comments");
+            };
+          }
         }
       }
 
@@ -1117,6 +1513,7 @@
         if (run?.channels?.length) {
           document.getElementById("runChannelsInput").value = run.channels.join(",");
         }
+        renderChatModelSelect();
         renderDataContextStrip();
       }
 
@@ -1286,6 +1683,316 @@
           await loadAll();
           appendMessage("General settings updated.");
         };
+      }
+
+      function renderSettingsTeam() {
+        const box = document.getElementById("settings-team");
+        box.innerHTML = `
+          <h3>Team</h3>
+          <div class="subtle">Add members for shared workspace threads, comments, and approvals.</div>
+          <div class="form-grid" style="margin-top:8px">
+            <label>Name<input id="teamName" placeholder="Alex Rivera" /></label>
+            <label>Email<input id="teamEmail" placeholder="alex@firm.com" /></label>
+            <label>Role
+              <select id="teamRole">
+                <option value="owner">owner</option>
+                <option value="admin">admin</option>
+                <option value="operator">operator</option>
+                <option value="analyst" selected>analyst</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </label>
+            <label>Title<input id="teamTitle" placeholder="RevOps Lead" /></label>
+            <button id="addTeamMemberBtn" class="primary">Add Team Member</button>
+          </div>
+          <div class="list" id="teamList" style="margin-top:10px"></div>
+        `;
+
+        const teamList = document.getElementById("teamList");
+        teamList.innerHTML = appState.team.length
+          ? appState.team.map((member) => `
+              <div class="item">
+                <div><strong>${member.name}</strong> <span class="status mono">${member.role}</span></div>
+                <div class="subtle">${member.email}${member.title ? ` • ${member.title}` : ""}</div>
+              </div>
+            `).join("")
+          : `<div class="item">No team members yet</div>`;
+
+        const addTeamMemberBtn = document.getElementById("addTeamMemberBtn");
+        if (addTeamMemberBtn) {
+          addTeamMemberBtn.onclick = async () => {
+            await api("/v1/settings/team", {
+              method: "POST",
+              body: JSON.stringify({
+                name: document.getElementById("teamName").value,
+                email: document.getElementById("teamEmail").value,
+                role: document.getElementById("teamRole").value,
+                title: document.getElementById("teamTitle").value
+              })
+            });
+            await loadAll();
+            setSettingsTab("team");
+            appendMessage("Team member added.");
+          };
+        }
+      }
+
+      function renderSettingsSetup() {
+        const checklist = appState.settings?.checklist || {};
+        const done = Object.values(checklist).filter(Boolean).length;
+        const total = Object.keys(checklist).length || 4;
+        const pct = total ? Math.round((done / total) * 100) : 0;
+        const box = document.getElementById("settings-setup");
+        box.innerHTML = `
+          <h3>Setup</h3>
+          <div class="subtle">Complete the core setup path for fast adoption.</div>
+          <div class="card" style="margin-top:8px">
+            <div><strong>Progress: ${done}/${total}</strong></div>
+            <div class="progress-track" style="margin-top:6px"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div class="list" style="margin-top:8px">
+              <div class="item">1. Data Integrations: ${checklist.connectionsConfigured ? "Done" : "Pending"}</div>
+              <div class="item">2. Model Profile: ${checklist.modelProfileConfigured ? "Done" : "Pending"}</div>
+              <div class="item">3. Report Type: ${checklist.reportTypeConfigured ? "Done" : "Pending"}</div>
+              <div class="item">4. Channel Delivery: ${checklist.channelsConfigured ? "Done" : "Pending"}</div>
+            </div>
+            <div class="toolbar" style="margin-top:8px">
+              <button id="setupGoIntegrationsBtn">Integrations</button>
+              <button id="setupGoModelsBtn">Models</button>
+              <button id="setupGoReportsBtn">Reports</button>
+              <button id="setupGoChannelsBtn">Channels</button>
+              <button id="setupStarterPackBtn" class="primary">Apply Starter Pack</button>
+            </div>
+          </div>
+        `;
+        const setupGoIntegrationsBtn = document.getElementById("setupGoIntegrationsBtn");
+        if (setupGoIntegrationsBtn) setupGoIntegrationsBtn.onclick = () => setSettingsTab("integrations");
+        const setupGoModelsBtn = document.getElementById("setupGoModelsBtn");
+        if (setupGoModelsBtn) setupGoModelsBtn.onclick = () => setSettingsTab("models");
+        const setupGoReportsBtn = document.getElementById("setupGoReportsBtn");
+        if (setupGoReportsBtn) setupGoReportsBtn.onclick = () => setSettingsTab("reports");
+        const setupGoChannelsBtn = document.getElementById("setupGoChannelsBtn");
+        if (setupGoChannelsBtn) setupGoChannelsBtn.onclick = () => setSettingsTab("channels");
+        const setupStarterPackBtn = document.getElementById("setupStarterPackBtn");
+        if (setupStarterPackBtn) setupStarterPackBtn.onclick = applyStarterPack;
+      }
+
+      function renderSettingsMcpAgents() {
+        const box = document.getElementById("settings-mcp-agents");
+        box.innerHTML = `
+          <h3>MCP & Agents</h3>
+          <div class="subtle">Configure MCP servers and inspect agent/device-command activity.</div>
+          <div class="card" style="margin-top:8px">
+            <h4>Add MCP Server</h4>
+            <div class="form-grid">
+              <label>Provider
+                <select id="mcpProviderSelect"></select>
+              </label>
+              <label>Name<input id="mcpServerName" placeholder="Primary Filesystem MCP" /></label>
+              <label class="full">Endpoint<input id="mcpServerEndpoint" placeholder="http://localhost:9000/mcp" /></label>
+              <label>Auth Ref<input id="mcpAuthRef" placeholder="secret_ref_..." /></label>
+              <label class="full">Allowed Folder IDs (comma separated)<input id="mcpAllowedFolders" placeholder="workspace_folder_..." /></label>
+              <button id="addMcpServerBtn" class="primary">Add MCP Server</button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:8px">
+            <h4>Configured MCP Servers</h4>
+            <div class="list" id="mcpServerList"></div>
+          </div>
+          <div class="card" style="margin-top:8px">
+            <h4>Agent Job History</h4>
+            <div class="list" id="agentJobList"></div>
+          </div>
+          <div class="card" style="margin-top:8px">
+            <h4>Device Commands</h4>
+            <div class="list" id="deviceCommandList"></div>
+          </div>
+        `;
+
+        fillSelect("mcpProviderSelect", appState.mcpProviders, "provider", "displayName", false);
+        const mcpServerList = document.getElementById("mcpServerList");
+        mcpServerList.innerHTML = appState.mcpServers.length
+          ? appState.mcpServers.map((server) => `
+              <div class="item">
+                <div><strong>${server.name}</strong> <span class="status mono">${server.provider}</span> ${formatStatus(server.status)}</div>
+                <div class="subtle">${server.endpoint || "(no endpoint)"} | folders=${(server.allowedFolderIds || []).length}</div>
+                <div class="toolbar" style="margin-top:6px">
+                  <button data-test-mcp-server="${server.id}">Test</button>
+                </div>
+              </div>
+            `).join("")
+          : `<div class="item">No MCP servers configured</div>`;
+
+        mcpServerList.querySelectorAll("[data-test-mcp-server]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/settings/mcp/servers/${encodeURIComponent(btn.dataset.testMcpServer)}/test`, { method: "POST" });
+            await loadAll();
+            setSettingsTab("mcp-agents");
+            appendMessage("MCP server test complete.");
+          };
+        });
+
+        document.getElementById("addMcpServerBtn").onclick = async () => {
+          await api("/v1/settings/mcp/servers", {
+            method: "POST",
+            body: JSON.stringify({
+              provider: document.getElementById("mcpProviderSelect").value,
+              name: document.getElementById("mcpServerName").value,
+              endpoint: document.getElementById("mcpServerEndpoint").value,
+              authRef: document.getElementById("mcpAuthRef").value,
+              allowedFolderIds: document.getElementById("mcpAllowedFolders").value
+                .split(",")
+                .map((value) => value.trim())
+                .filter(Boolean)
+            })
+          });
+          await loadAll();
+          setSettingsTab("mcp-agents");
+          appendMessage("MCP server configured.");
+        };
+
+        const agentJobList = document.getElementById("agentJobList");
+        agentJobList.innerHTML = appState.agentJobs.length
+          ? appState.agentJobs.slice(0, 20).map((job) => `
+              <div class="item">
+                <div><strong>${job.jobType}</strong> ${formatStatus(job.status)}</div>
+                <div class="subtle">${job.folderId || "no-folder"} • ${job.threadId || "no-thread"} • ${new Date(job.createdAt).toLocaleString()}</div>
+              </div>
+            `).join("")
+          : `<div class="item">No agent jobs yet</div>`;
+
+        const deviceCommandList = document.getElementById("deviceCommandList");
+        deviceCommandList.innerHTML = appState.deviceCommands.length
+          ? appState.deviceCommands.slice(0, 20).map((request) => `
+              <div class="item">
+                <div><strong>${request.command}</strong> ${request.args?.join(" ") || ""} ${formatStatus(request.status)}</div>
+                <div class="subtle">${request.policyReason} • ${new Date(request.createdAt).toLocaleString()}</div>
+                ${request.output ? `<pre class="mono" style="white-space:pre-wrap">${request.output}</pre>` : ""}
+                ${request.error ? `<div class="subtle">${request.error}</div>` : ""}
+              </div>
+            `).join("")
+          : `<div class="item">No device command requests yet</div>`;
+      }
+
+      function renderSettingsIntegrations() {
+        const box = document.getElementById("settings-integrations");
+        box.innerHTML = `
+          <h3>Quick Add Integrations</h3>
+          <div class="subtle">Connect tools your team already uses in a few clicks.</div>
+          <div class="list" id="integrationQuickAddList" style="margin-top:8px"></div>
+        `;
+
+        const list = document.getElementById("integrationQuickAddList");
+        if (!appState.integrationCatalog.length) {
+          list.innerHTML = `<div class="item">No integration presets available</div>`;
+          return;
+        }
+
+        list.innerHTML = appState.integrationCatalog.map((integration) => {
+          if (integration.kind === "source") {
+            return `
+              <div class="item" data-integration-key="${integration.key}">
+                <div><strong>${integration.name}</strong> <span class="status mono">${integration.kind}</span></div>
+                <div class="subtle">${integration.description || ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label class="full">Credential Ref / Token<input data-int-auth-ref placeholder="secret_ref_or_token" /></label>
+                  <label>Initial Sync Days<input data-int-period-days type="number" value="14" min="1" /></label>
+                  <label>Run Initial Sync
+                    <select data-int-run-sync>
+                      <option value="true" selected>true</option>
+                      <option value="false">false</option>
+                    </select>
+                  </label>
+                  <button data-int-quick-add="${integration.key}" class="primary">Connect ${integration.name}</button>
+                </div>
+              </div>
+            `;
+          }
+          if (integration.kind === "channel" && integration.channel === "slack") {
+            return `
+              <div class="item" data-integration-key="${integration.key}">
+                <div><strong>${integration.name}</strong> <span class="status mono">${integration.kind}</span></div>
+                <div class="subtle">${integration.description || ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label class="full">Slack Webhook Ref<input data-int-slack-webhook placeholder="slack_webhook_ref" /></label>
+                  <button data-int-quick-add="${integration.key}" class="primary">Enable Slack</button>
+                </div>
+              </div>
+            `;
+          }
+          if (integration.kind === "channel" && integration.channel === "telegram") {
+            return `
+              <div class="item" data-integration-key="${integration.key}">
+                <div><strong>${integration.name}</strong> <span class="status mono">${integration.kind}</span></div>
+                <div class="subtle">${integration.description || ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label>Bot Token Ref<input data-int-telegram-token placeholder="telegram_bot_token_ref" /></label>
+                  <label>Chat ID<input data-int-telegram-chat placeholder="123456789" /></label>
+                  <button data-int-quick-add="${integration.key}" class="primary">Enable Telegram</button>
+                </div>
+              </div>
+            `;
+          }
+          if (integration.kind === "mcp") {
+            return `
+              <div class="item" data-integration-key="${integration.key}">
+                <div><strong>${integration.name}</strong> <span class="status mono">${integration.kind}</span></div>
+                <div class="subtle">${integration.description || ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label class="full">Endpoint<input data-int-mcp-endpoint value="${integration.defaultEndpoint || ""}" placeholder="mcp endpoint" /></label>
+                  <label>Auth Ref<input data-int-mcp-auth placeholder="secret_ref" /></label>
+                  <label>Folder IDs<input data-int-mcp-folders placeholder="${(appState.folders || []).slice(0, 2).map((f) => f.id).join(",")}" /></label>
+                  <button data-int-quick-add="${integration.key}" class="primary">Connect ${integration.name}</button>
+                </div>
+              </div>
+            `;
+          }
+          return `
+            <div class="item" data-integration-key="${integration.key}">
+              <div><strong>${integration.name}</strong></div>
+              <div class="subtle">${integration.description || ""}</div>
+              <button data-int-quick-add="${integration.key}" class="primary" style="margin-top:8px">Quick Add</button>
+            </div>
+          `;
+        }).join("");
+
+        list.querySelectorAll("[data-int-quick-add]").forEach((btn) => {
+          btn.onclick = async () => {
+            const integrationKey = btn.dataset.intQuickAdd;
+            const container = btn.closest("[data-integration-key]");
+            if (!container) return;
+
+            const payload = { integrationKey };
+            const authRef = container.querySelector("[data-int-auth-ref]")?.value?.trim();
+            if (authRef) payload.authRef = authRef;
+            const periodDays = Number(container.querySelector("[data-int-period-days]")?.value ?? 14);
+            if (Number.isFinite(periodDays)) payload.periodDays = periodDays;
+            const runInitialSync = container.querySelector("[data-int-run-sync]")?.value;
+            if (runInitialSync) payload.runInitialSync = runInitialSync === "true";
+            const webhookRef = container.querySelector("[data-int-slack-webhook]")?.value?.trim();
+            if (webhookRef) payload.webhookRef = webhookRef;
+            const botTokenRef = container.querySelector("[data-int-telegram-token]")?.value?.trim();
+            if (botTokenRef) payload.botTokenRef = botTokenRef;
+            const chatId = container.querySelector("[data-int-telegram-chat]")?.value?.trim();
+            if (chatId) payload.chatId = chatId;
+            const endpoint = container.querySelector("[data-int-mcp-endpoint]")?.value?.trim();
+            if (endpoint) payload.endpoint = endpoint;
+            const mcpAuthRef = container.querySelector("[data-int-mcp-auth]")?.value?.trim();
+            if (mcpAuthRef) payload.authRef = mcpAuthRef;
+            const folderIds = (container.querySelector("[data-int-mcp-folders]")?.value ?? "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean);
+            if (folderIds.length) payload.allowedFolderIds = folderIds;
+
+            await api("/v1/integrations/quick-add", {
+              method: "POST",
+              body: JSON.stringify(payload)
+            });
+            await loadAll();
+            setSettingsTab("integrations");
+            appendMessage(`Integration connected: ${integrationKey}`);
+          };
+        });
       }
 
       function renderSettingsConnections() {
@@ -1672,12 +2379,17 @@
             <div class="list" id="installedSkillsList"></div>
           </div>
           <div class="card">
+            <h4>Built-in Processing Tools</h4>
+            <div class="list" id="skillToolCatalogList"></div>
+          </div>
+          <div class="card">
             <h4>Guided Skill Wizard</h4>
             <div class="form-grid">
               <label>Name<input id="skillDraftName" value="Custom Ops Skill" /></label>
               <label>Version<input id="skillDraftVersion" value="1.0.0" /></label>
               <label class="full">Intent (single)<input id="skillDraftIntent" value="ops_followup" /></label>
               <label class="full">Channels (comma separated)<input id="skillDraftChannels" value="web,slack,api" /></label>
+              <label class="full">Tools (comma separated)<input id="skillDraftTools" value="compute.data_quality_snapshot,model.run,reports.generate" /></label>
               <label class="full">System Prompt<textarea id="skillDraftPrompt">Prioritize concise, actionable operating recommendations.</textarea></label>
               <button id="createSkillDraftBtn" class="primary">Create Draft</button>
             </div>
@@ -1702,7 +2414,7 @@
                 </select>
               </label>
               <label class="full">Intent<input id="skillSandboxIntent" value="analysis_run" /></label>
-              <label class="full">Requested Tools (comma separated)<input id="skillSandboxTools" value="model.run" /></label>
+              <label class="full">Requested Tools (comma separated)<input id="skillSandboxTools" value="compute.data_quality_snapshot,model.run" /></label>
               <label>Estimated Tokens<input id="skillSandboxTokens" type="number" value="900" min="0" /></label>
               <label>Timeout (ms)<input id="skillSandboxTimeout" type="number" value="2500" min="1" /></label>
               <label>Generate Report
@@ -1720,15 +2432,33 @@
         const installedList = document.getElementById("installedSkillsList");
         installedList.innerHTML = appState.skillsInstalled.length
           ? appState.skillsInstalled.map((s) => `
-              <div class="item">
-                <div>${s.id} ${s.active ? "<span class='status'>active</span>" : ""}</div>
+              <div class="item" data-installed-skill-id="${s.id}">
+                <div><strong>${s.id}</strong> ${s.active ? "<span class='status'>active</span>" : ""}</div>
+                <div class="subtle">${s.manifest?.description || ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label class="full">System Prompt<textarea data-skill-prompt>${s.manifest?.prompts?.system || ""}</textarea></label>
+                  <label>Confidence Min<input data-skill-confidence type="number" min="0" max="1" step="0.01" value="${s.manifest?.guardrails?.confidenceMin ?? 0.7}" /></label>
+                  <label>Token Budget<input data-skill-token type="number" min="1" value="${s.manifest?.guardrails?.tokenBudget ?? 2500}" /></label>
+                  <label class="full">Allowed Tools (comma separated)<input data-skill-tools value="${(s.manifest?.tools || []).filter((t) => t.allow).map((t) => t.id).join(",")}" /></label>
+                </div>
                 <div class="toolbar" style="margin-top:6px">
                   <button data-activate-skill="${s.id}">Activate</button>
                   <button data-deactivate-skill="${s.id}">Deactivate</button>
+                  <button data-save-skill="${s.id}">Save</button>
                 </div>
               </div>
             `).join("")
           : `<div class="item">No installed skills</div>`;
+
+        const skillToolCatalogList = document.getElementById("skillToolCatalogList");
+        skillToolCatalogList.innerHTML = appState.skillTools.length
+          ? appState.skillTools.map((tool) => `
+              <div class="item">
+                <div><strong>${tool.id}</strong> <span class="subtle">(${tool.domain})</span></div>
+                <div class="subtle">${tool.description}</div>
+              </div>
+            `).join("")
+          : `<div class="item">No tool catalog loaded</div>`;
 
         installedList.querySelectorAll("[data-activate-skill]").forEach((btn) => {
           btn.onclick = async () => {
@@ -1746,6 +2476,34 @@
           };
         });
 
+        installedList.querySelectorAll("[data-save-skill]").forEach((btn) => {
+          btn.onclick = async () => {
+            const container = btn.closest("[data-installed-skill-id]");
+            if (!container) return;
+            const toolIds = (container.querySelector("[data-skill-tools]")?.value ?? "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean);
+            await api(`/v1/skills/installed/${encodeURIComponent(btn.dataset.saveSkill)}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                manifest: {
+                  prompts: {
+                    system: container.querySelector("[data-skill-prompt]")?.value ?? ""
+                  },
+                  guardrails: {
+                    confidenceMin: Number(container.querySelector("[data-skill-confidence]")?.value ?? 0.7),
+                    tokenBudget: Number(container.querySelector("[data-skill-token]")?.value ?? 2500)
+                  },
+                  tools: toolIds.map((id) => ({ id, allow: true }))
+                }
+              })
+            });
+            await loadAll();
+            appendMessage("Skill configuration saved.");
+          };
+        });
+
         document.getElementById("createSkillDraftBtn").onclick = async () => {
           const draft = await api("/v1/skills/drafts", {
             method: "POST",
@@ -1759,7 +2517,11 @@
                   intents: [document.getElementById("skillDraftIntent").value],
                   channels: document.getElementById("skillDraftChannels").value.split(",").map((s) => s.trim()).filter(Boolean)
                 },
-                tools: [{ id: "model.run", allow: true }, { id: "reports.generate", allow: true }],
+                tools: document.getElementById("skillDraftTools").value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((id) => ({ id, allow: true })),
                 guardrails: {
                   confidenceMin: 0.7,
                   humanApprovalFor: ["adjust_budget"],
@@ -1940,7 +2702,11 @@
       }
 
       async function renderSettings() {
+        renderSettingsSetup();
         renderSettingsGeneral();
+        renderSettingsTeam();
+        renderSettingsMcpAgents();
+        renderSettingsIntegrations();
         renderSettingsConnections();
         renderSettingsCredentials();
         renderSettingsModels();
@@ -2000,6 +2766,17 @@
         appState.sourceRunHistoryByConnection = Object.fromEntries(entries);
       }
 
+      async function refreshThreadComments() {
+        const threadId = appState.activeThreadId;
+        if (!threadId) return;
+        try {
+          const result = await api(`/v1/workspace/threads/${encodeURIComponent(threadId)}/comments`);
+          appState.commentsByThread[threadId] = result.comments || [];
+        } catch {
+          appState.commentsByThread[threadId] = [];
+        }
+      }
+
       async function refreshRunArtifacts() {
         const run = currentRun();
         if (!run) return;
@@ -2035,8 +2812,17 @@
         let insightRes;
         let actionsRes;
         let channelEventsRes;
+        let teamRes;
+        let foldersRes;
+        let threadsRes;
+        let skillToolsRes;
+        let mcpCatalogRes;
+        let mcpServersRes;
+        let agentJobsRes;
+        let deviceCommandsRes;
+        let integrationsCatalogRes;
         try {
-          [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes] = await Promise.all([
+          [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes, teamRes, foldersRes, threadsRes, skillToolsRes, mcpCatalogRes, mcpServersRes, agentJobsRes, deviceCommandsRes, integrationsCatalogRes] = await Promise.all([
             api("/v1/settings"),
             api("/v1/sources/connections"),
             api("/v1/models/profiles"),
@@ -2046,7 +2832,16 @@
             api("/v1/analysis-runs"),
             api("/v1/insights/latest"),
             api("/v1/agents/actions/pending"),
-            api("/v1/channels/events")
+            api("/v1/channels/events"),
+            api("/v1/settings/team").catch(() => ({ team: [] })),
+            api("/v1/workspace/folders").catch(() => ({ folders: [] })),
+            api("/v1/workspace/threads").catch(() => ({ threads: [] })),
+            api("/v1/skills/tools").catch(() => ({ tools: [] })),
+            api("/v1/settings/mcp/catalog").catch(() => ({ providers: [] })),
+            api("/v1/settings/mcp/servers").catch(() => ({ servers: [] })),
+            api("/v1/agents/jobs").catch(() => ({ jobs: [] })),
+            api("/v1/agents/device-commands").catch(() => ({ requests: [] })),
+            api("/v1/integrations/catalog").catch(() => ({ integrations: [] }))
           ]);
           setSystemAlert("");
         } catch (error) {
@@ -2063,11 +2858,34 @@
         appState.profiles = profilesRes.profiles || [];
         appState.reportTypes = reportTypeRes.types || [];
         appState.skillsInstalled = skillsRes.installed || [];
+        appState.skillTools = skillToolsRes.tools || [];
         appState.skillDrafts = draftsRes.drafts || [];
         appState.runs = runsRes.runs || [];
         appState.latestInsight = insightRes.insight;
         appState.pendingActions = actionsRes.actions || [];
         appState.channelEvents = channelEventsRes.events || [];
+        appState.team = teamRes.team || [];
+        appState.folders = foldersRes.folders || [];
+        appState.threads = threadsRes.threads || [];
+        appState.mcpProviders = mcpCatalogRes.providers || [];
+        appState.mcpServers = mcpServersRes.servers || [];
+        appState.agentJobs = agentJobsRes.jobs || [];
+        appState.deviceCommands = deviceCommandsRes.requests || [];
+        appState.integrationCatalog = integrationsCatalogRes.integrations || [];
+
+        const checklist = appState.settings?.checklist || {};
+        const onboardingIncomplete = Object.values(checklist).some((value) => !value);
+        if (onboardingIncomplete && !appState.focusMode) {
+          appState.rightRailCollapsed = true;
+        }
+
+        if (!appState.activeFolderId || !appState.folders.some((item) => item.id === appState.activeFolderId)) {
+          appState.activeFolderId = appState.folders[0]?.id || null;
+        }
+        const folderThreads = appState.threads.filter((item) => item.folderId === appState.activeFolderId);
+        if (!appState.activeThreadId || !folderThreads.some((item) => item.id === appState.activeThreadId)) {
+          appState.activeThreadId = folderThreads[0]?.id || null;
+        }
 
         if (!appState.activeRunId && appState.runs.length) {
           appState.activeRunId = appState.runs[appState.runs.length - 1].id;
@@ -2075,13 +2893,19 @@
 
         await refreshMetrics();
         await refreshSourceRunHistory();
+        await refreshThreadComments();
         await refreshRunArtifacts();
 
         renderOnboarding();
         renderRunBuilder();
         renderRunPreviews();
         renderKPIs();
+        renderFolderList();
         renderRunContextList();
+        renderThreadList();
+        renderSharedThread();
+        renderAttachmentTray();
+        renderChatQuickActions();
         renderRunList();
         renderRunDetail();
         renderContextPanel();
@@ -2174,10 +2998,42 @@
       }
 
       async function runChatIntent(promptText) {
-        const profile = appState.profiles.find((item) => item.id === document.getElementById("runModelSelect").value) || appState.profiles.find((item) => item.active) || null;
+        const modelCommandMatch = promptText.match(/^\/model\s+(.+)$/i);
+        if (modelCommandMatch) {
+          const query = modelCommandMatch[1].trim().toLowerCase();
+          const matched = appState.profiles.find((item) => item.name.toLowerCase().includes(query) || item.id.toLowerCase().includes(query));
+          if (!matched) {
+            appendMessage(`No model profile matches '${modelCommandMatch[1]}'.`, "ai");
+            return;
+          }
+          const chatModelProfileSelect = document.getElementById("chatModelProfileSelect");
+          if (chatModelProfileSelect) chatModelProfileSelect.value = matched.id;
+          appendMessage(`Model set to ${matched.name}.`, "ai");
+          return;
+        }
+
+        const profile = selectedModelProfile();
         if (!profile) {
           appendMessage("No model profile available. Configure one in Settings > Models.");
           return;
+        }
+
+        const thread = currentThread();
+        const attachmentNote = appState.pendingAttachments.length
+          ? `\n\nAttachments: ${appState.pendingAttachments.map((item) => item.name).join(", ")}`
+          : "";
+        const fullPrompt = `${promptText}${attachmentNote}`;
+        if (thread) {
+          await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
+            method: "POST",
+            body: JSON.stringify({
+              authorName: "ui-user",
+              role: "user",
+              body: fullPrompt
+            })
+          });
+        } else {
+          appendMessage(fullPrompt, "user");
         }
 
         const response = await api("/v1/models/run", {
@@ -2190,7 +3046,19 @@
           })
         });
 
-        appendMessage(response.insight.summary, "ai");
+        if (thread) {
+          await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
+            method: "POST",
+            body: JSON.stringify({
+              authorName: "InsightFoundry",
+              role: "assistant",
+              body: response.insight.summary
+            })
+          });
+        } else {
+          appendMessage(response.insight.summary, "ai");
+        }
+        appState.pendingAttachments = [];
         await loadAll();
       }
 
@@ -2223,6 +3091,22 @@
           openSettingsTab("channels");
           return;
         }
+        if (command === "open settings team") {
+          openSettingsTab("team");
+          return;
+        }
+        if (command === "open settings mcp") {
+          openSettingsTab("mcp-agents");
+          return;
+        }
+        if (command === "open settings integrations") {
+          openSettingsTab("integrations");
+          return;
+        }
+        if (command === "open settings setup") {
+          openSettingsTab("setup");
+          return;
+        }
         if (command === "open settings models") {
           openSettingsTab("models");
           return;
@@ -2231,7 +3115,7 @@
           openSettingsTab("skills");
           return;
         }
-        appendMessage("Unknown command. Try: new run | execute run | deliver run | open settings connections/channels/models/skills");
+        appendMessage("Unknown command. Try: new run | execute run | deliver run | open settings setup/integrations/connections/channels/team/mcp/models/skills");
       }
 
       function bindEvents() {
@@ -2240,6 +3124,13 @@
         });
         const leftToggle = document.getElementById("toggleLeftRailBtn");
         const rightToggle = document.getElementById("toggleRightRailBtn");
+        const focusToggle = document.getElementById("toggleFocusModeBtn");
+        if (focusToggle) {
+          focusToggle.onclick = () => {
+            appState.focusMode = !appState.focusMode;
+            applyWorkspaceLayout();
+          };
+        }
         if (leftToggle) {
           leftToggle.onclick = () => {
             appState.leftRailCollapsed = !appState.leftRailCollapsed;
@@ -2268,10 +3159,96 @@
         document.getElementById("quickNewRunBtn").onclick = createDraftRunFromBuilder;
         document.getElementById("quickExecuteBtn").onclick = executeCurrentRun;
         document.getElementById("quickDeliverBtn").onclick = deliverCurrentRun;
-        document.getElementById("quickSettingsBtn").onclick = () => openSettingsTab("connections");
+        document.getElementById("quickSettingsBtn").onclick = () => openSettingsTab("setup");
+        document.getElementById("chatOpenModelsBtn").onclick = () => openSettingsTab("models");
+        document.getElementById("chatOpenChannelsBtn").onclick = () => openSettingsTab("channels");
+        document.getElementById("runCoworkAgentBtn").onclick = async () => {
+          if (!appState.activeFolderId) {
+            appendMessage("Select a folder first.", "ai");
+            return;
+          }
+          const prompt = (document.getElementById("agentCoworkPrompt").value || "").trim() || "Summarize this thread and suggest next steps.";
+          await api("/v1/agents/jobs", {
+            method: "POST",
+            body: JSON.stringify({
+              jobType: "cowork_thread",
+              folderId: appState.activeFolderId,
+              threadId: appState.activeThreadId,
+              input: prompt
+            })
+          });
+          await loadAll();
+          appendMessage("Agent cowork run completed for active thread.");
+        };
+        document.getElementById("requestDeviceCommandBtn").onclick = async () => {
+          const command = (document.getElementById("deviceCommandInput").value || "").trim();
+          const args = (document.getElementById("deviceCommandArgsInput").value || "")
+            .split(" ")
+            .map((value) => value.trim())
+            .filter(Boolean);
+          if (!command) {
+            appendMessage("Enter a command to request.", "ai");
+            return;
+          }
+          await api("/v1/agents/device-commands", {
+            method: "POST",
+            body: JSON.stringify({
+              folderId: appState.activeFolderId,
+              threadId: appState.activeThreadId,
+              command,
+              args
+            })
+          });
+          document.getElementById("deviceCommandInput").value = "";
+          document.getElementById("deviceCommandArgsInput").value = "";
+          await loadAll();
+          setContextTab("actions");
+          appendMessage("Device command request submitted for approval.");
+        };
+        document.getElementById("newFolderBtn").onclick = async () => {
+          const input = document.getElementById("newFolderNameInput");
+          const name = input.value.trim();
+          if (!name) return;
+          await api("/v1/workspace/folders", {
+            method: "POST",
+            body: JSON.stringify({ name })
+          });
+          input.value = "";
+          await loadAll();
+        };
+        document.getElementById("newThreadBtn").onclick = async () => {
+          const input = document.getElementById("newThreadTitleInput");
+          const title = input.value.trim();
+          if (!title || !appState.activeFolderId) return;
+          await api("/v1/workspace/threads", {
+            method: "POST",
+            body: JSON.stringify({
+              folderId: appState.activeFolderId,
+              title
+            })
+          });
+          input.value = "";
+          await loadAll();
+        };
         const quickSkillsBtn = document.getElementById("quickSkillsBtn");
         if (quickSkillsBtn) {
           quickSkillsBtn.onclick = () => openSettingsTab("skills");
+        }
+        const attachFilesBtn = document.getElementById("attachFilesBtn");
+        const chatFileInput = document.getElementById("chatFileInput");
+        if (attachFilesBtn && chatFileInput) {
+          attachFilesBtn.onclick = () => chatFileInput.click();
+          chatFileInput.onchange = () => {
+            const files = Array.from(chatFileInput.files || []);
+            if (!files.length) return;
+            appState.pendingAttachments.push(...files.map((file) => ({
+              name: file.name,
+              type: file.type,
+              size: file.size
+            })));
+            chatFileInput.value = "";
+            renderAttachmentTray();
+          };
         }
 
         ["runSourceSelect", "runModelSelect", "runReportSelect", "runSkillSelect", "runChannelsInput"].forEach((id) => {
@@ -2282,6 +3259,12 @@
             previewCurrentRunOutput().catch((error) => appendMessage(`Preview error: ${error.message}`));
           });
         });
+        const chatModelProfileSelect = document.getElementById("chatModelProfileSelect");
+        if (chatModelProfileSelect) {
+          chatModelProfileSelect.addEventListener("change", () => {
+            renderDataContextStrip();
+          });
+        }
 
         document.getElementById("commandForm").addEventListener("submit", async (event) => {
           event.preventDefault();
@@ -2299,15 +3282,24 @@
           input.focus();
           input.select();
         });
+        document.getElementById("chatInput").addEventListener("paste", (event) => {
+          const files = Array.from(event.clipboardData?.files || []);
+          if (!files.length) return;
+          appState.pendingAttachments.push(...files.map((file) => ({
+            name: file.name || "pasted-image.png",
+            type: file.type,
+            size: file.size
+          })));
+          renderAttachmentTray();
+        });
 
         document.getElementById("chatForm").addEventListener("submit", async (event) => {
           event.preventDefault();
           const input = document.getElementById("chatInput");
           const text = input.value.trim();
-          if (!text) return;
-          appendMessage(text, "user");
+          if (!text && !appState.pendingAttachments.length) return;
           input.value = "";
-          await runChatIntent(text);
+          await runChatIntent(text || "Analyze attached files and screenshots.");
         });
       }
 

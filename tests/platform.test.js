@@ -375,6 +375,13 @@ test("skill pack install and run supports activation state and guardrails", asyn
     const installBody = await installRes.json();
     const skillId = installBody.install.id;
 
+    const toolsRes = await fetch(`${ctx.baseUrl}/v1/skills/tools`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(toolsRes.status, 200);
+    const toolsBody = await toolsRes.json();
+    assert.ok(toolsBody.tools.some((tool) => tool.id === "compute.finance_snapshot"));
+
     const runRes = await fetch(`${ctx.baseUrl}/v1/skills/run`, {
       method: "POST",
       headers: tenantHeaders(tenant.id),
@@ -382,7 +389,7 @@ test("skill pack install and run supports activation state and guardrails", asyn
         skillId,
         intent: "marketing_optimization",
         channel: "web",
-        requestedTools: ["model.run"],
+        requestedTools: ["compute.data_quality_snapshot", "model.run"],
         estimatedTokens: 1000,
         timeoutMs: 2000
       })
@@ -392,6 +399,26 @@ test("skill pack install and run supports activation state and guardrails", asyn
     assert.equal(runBody.run.skillId, skillId);
     assert.ok(Array.isArray(runBody.run.trace.guardrails));
     assert.ok(runBody.run.trace.guardrails.length > 0);
+    assert.ok(runBody.run.artifacts.deterministicOutputs["compute.data_quality_snapshot"]);
+
+    const patchInstalledSkill = await fetch(`${ctx.baseUrl}/v1/skills/installed/${encodeURIComponent(skillId)}`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        manifest: {
+          guardrails: { confidenceMin: 0.66, tokenBudget: 3200 },
+          prompts: { system: "Use deterministic snapshots before any model inference." },
+          tools: [
+            { id: "compute.data_quality_snapshot", allow: true },
+            { id: "model.run", allow: true }
+          ]
+        }
+      })
+    });
+    assert.equal(patchInstalledSkill.status, 200);
+    const patchBody = await patchInstalledSkill.json();
+    assert.equal(patchBody.skill.manifest.guardrails.confidenceMin, 0.66);
+    assert.equal(patchBody.skill.manifest.tools.length, 2);
 
     const deactivateRes = await fetch(`${ctx.baseUrl}/v1/skills/${encodeURIComponent(skillId)}/deactivate`, {
       method: "POST",
@@ -672,6 +699,260 @@ test("guided analysis run executes end-to-end with artifacts", async () => {
     const retryBody = await retry.json();
     assert.equal(retryBody.event.status, "delivered");
     assert.ok(Number(retryBody.event.attemptCount) >= 2);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("team settings and shared workspace threads stay tenant-scoped", async () => {
+  const ctx = await startServer();
+  try {
+    const tenantA = await createTenant(ctx.baseUrl, "Collab Tenant A");
+    const tenantB = await createTenant(ctx.baseUrl, "Collab Tenant B");
+
+    const teamRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(teamRes.status, 200);
+    const teamBody = await teamRes.json();
+    assert.ok(teamBody.team.length >= 1);
+
+    const addMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({
+        name: "Analyst One",
+        email: "analyst.one@example.com",
+        role: "analyst"
+      })
+    });
+    assert.equal(addMemberRes.status, 201);
+
+    const folderCreateRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({ name: "Deal Desk" })
+    });
+    assert.equal(folderCreateRes.status, 201);
+    const folderId = (await folderCreateRes.json()).folder.id;
+
+    const threadCreateRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({
+        folderId,
+        title: "Large Renewal Escalation"
+      })
+    });
+    assert.equal(threadCreateRes.status, 201);
+    const threadId = (await threadCreateRes.json()).thread.id;
+
+    const commentCreateRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads/${threadId}/comments`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({
+        authorName: "analyst.one",
+        role: "comment",
+        body: "Need pricing approval before EOD."
+      })
+    });
+    assert.equal(commentCreateRes.status, 201);
+
+    const commentsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads/${threadId}/comments`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(commentsRes.status, 200);
+    const commentsBody = await commentsRes.json();
+    assert.ok(commentsBody.comments.some((item) => /pricing approval/i.test(item.body)));
+
+    const crossTenantRead = await fetch(`${ctx.baseUrl}/v1/workspace/threads/${threadId}/comments`, {
+      headers: tenantHeaders(tenantB.id)
+    });
+    assert.equal(crossTenantRead.status, 404);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("mcp settings and folder-scoped agent command approvals work end-to-end", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "MCP Agent Co");
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(foldersRes.status, 200);
+    const folders = (await foldersRes.json()).folders;
+    assert.ok(folders.length > 0);
+    const folderId = folders[0].id;
+
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(threadsRes.status, 200);
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const mcpCatalog = await fetch(`${ctx.baseUrl}/v1/settings/mcp/catalog`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(mcpCatalog.status, 200);
+    const mcpCatalogBody = await mcpCatalog.json();
+    assert.ok(mcpCatalogBody.providers.some((provider) => provider.provider === "filesystem"));
+
+    const createMcp = await fetch(`${ctx.baseUrl}/v1/settings/mcp/servers`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        provider: "filesystem",
+        name: "Workspace FS",
+        endpoint: "",
+        authRef: "",
+        allowedFolderIds: [folderId]
+      })
+    });
+    assert.equal(createMcp.status, 201);
+    const mcpServerId = (await createMcp.json()).server.id;
+
+    const testMcp = await fetch(`${ctx.baseUrl}/v1/settings/mcp/servers/${mcpServerId}/test`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(testMcp.status, 200);
+    const testMcpBody = await testMcp.json();
+    assert.equal(testMcpBody.status, "success");
+
+    const coworkJob = await fetch(`${ctx.baseUrl}/v1/agents/jobs`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        jobType: "cowork_thread",
+        folderId,
+        threadId,
+        input: "Summarize blockers and next actions."
+      })
+    });
+    assert.equal(coworkJob.status, 201);
+
+    const commentsAfterJob = await fetch(`${ctx.baseUrl}/v1/workspace/threads/${threadId}/comments`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(commentsAfterJob.status, 200);
+    const commentsBody = await commentsAfterJob.json();
+    assert.ok(commentsBody.comments.some((comment) => /Agent cowork completed/i.test(comment.body)));
+
+    const commandReq = await fetch(`${ctx.baseUrl}/v1/agents/device-commands`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        folderId,
+        threadId,
+        command: "pwd",
+        args: []
+      })
+    });
+    assert.equal(commandReq.status, 201);
+    const requestId = (await commandReq.json()).request.id;
+
+    const commandApprove = await fetch(`${ctx.baseUrl}/v1/agents/device-commands/${requestId}/approve`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        decision: "approve",
+        executeNow: true
+      })
+    });
+    assert.equal(commandApprove.status, 200);
+    const commandApproveBody = await commandApprove.json();
+    assert.equal(commandApproveBody.request.status, "executed");
+    assert.equal(commandApproveBody.request.exitCode, 0);
+
+    const deniedReq = await fetch(`${ctx.baseUrl}/v1/agents/device-commands`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        folderId,
+        threadId,
+        command: "rm",
+        args: ["-rf", "/tmp/unsafe"]
+      })
+    });
+    assert.equal(deniedReq.status, 201);
+    const deniedReqBody = await deniedReq.json();
+    assert.equal(deniedReqBody.request.status, "denied");
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("quick add integrations connects source, channels, and mcp in settings flows", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Integrations Quick Add Co");
+
+    const catalogRes = await fetch(`${ctx.baseUrl}/v1/integrations/catalog`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(catalogRes.status, 200);
+    const catalogBody = await catalogRes.json();
+    assert.ok(catalogBody.integrations.some((item) => item.key === "google_ads"));
+    assert.ok(catalogBody.integrations.some((item) => item.key === "slack_channel"));
+
+    const quickSource = await fetch(`${ctx.baseUrl}/v1/integrations/quick-add`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        integrationKey: "google_ads",
+        authRef: "ga_secret_ref",
+        runInitialSync: true,
+        periodDays: 10
+      })
+    });
+    assert.equal(quickSource.status, 201);
+    const quickSourceBody = await quickSource.json();
+    assert.equal(quickSourceBody.result.connection.sourceType, "google_ads");
+    assert.equal(quickSourceBody.result.initialSync.syncStatus, "success");
+
+    const sourceConnections = await fetch(`${ctx.baseUrl}/v1/sources/connections`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const sourceConnectionsBody = await sourceConnections.json();
+    assert.ok(sourceConnectionsBody.connections.some((item) => item.sourceType === "google_ads"));
+
+    const quickSlack = await fetch(`${ctx.baseUrl}/v1/integrations/quick-add`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        integrationKey: "slack_channel",
+        webhookRef: "slack_ref_123"
+      })
+    });
+    assert.equal(quickSlack.status, 201);
+
+    const channelsRes = await fetch(`${ctx.baseUrl}/v1/settings/channels`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const channelsBody = await channelsRes.json();
+    assert.equal(channelsBody.channels.slack.enabled, true);
+    assert.equal(channelsBody.channels.slack.webhookRef, "slack_ref_123");
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const quickMcp = await fetch(`${ctx.baseUrl}/v1/integrations/quick-add`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        integrationKey: "google_drive_mcp",
+        authRef: "gdrive_ref_123",
+        allowedFolderIds: [folderId]
+      })
+    });
+    assert.equal(quickMcp.status, 201);
+    const quickMcpBody = await quickMcp.json();
+    assert.equal(quickMcpBody.result.server.provider, "google-drive");
+    assert.equal(quickMcpBody.result.test.status, "success");
   } finally {
     await ctx.stop();
   }

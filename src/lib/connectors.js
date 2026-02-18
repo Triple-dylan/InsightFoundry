@@ -14,6 +14,8 @@ const PROVIDER_DOMAINS = {
   hubspot: ["sales", "marketing"],
   stripe: ["finance"],
   quickbooks: ["finance"],
+  google_sheets: ["marketing", "finance", "sales", "ops"],
+  excel_365: ["marketing", "finance", "sales", "ops"],
   csv_upload: ["marketing", "finance", "sales", "ops"]
 };
 
