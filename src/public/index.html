@@ -432,6 +432,127 @@
         gap: 8px;
       }
       .mono { font-family: "JetBrains Mono", monospace; }
+
+      /* Workspace V3: simplify toward codex-like density and hierarchy */
+      :root {
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --line: #d8dde3;
+        --line-strong: #c7ced6;
+        --text: #111827;
+        --muted: #5b6472;
+        --accent: #2563eb;
+        --accent-deep: #1d4ed8;
+        --accent-soft: #e8efff;
+        --shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
+        --glass-blur: 0px;
+        --radius-lg: 12px;
+      }
+      body {
+        background: var(--bg);
+      }
+      body::before,
+      body::after {
+        display: none;
+      }
+      .topbar {
+        height: 56px;
+        background: #ffffff;
+        border-color: var(--line);
+        backdrop-filter: none;
+      }
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        box-shadow: 0 0 0 4px #dff1e8;
+      }
+      .panel,
+      .card,
+      .item,
+      .chat,
+      .context-body,
+      .commandbar,
+      .workspace-hero,
+      .preview-panel {
+        background: #ffffff;
+        backdrop-filter: none;
+      }
+      .workspace {
+        grid-template-columns: 220px 1fr 360px;
+        gap: 12px;
+      }
+      .left-rail,
+      .center,
+      .right-rail {
+        padding: 10px;
+      }
+      .left-rail .card {
+        padding: 12px;
+      }
+      .center {
+        grid-template-rows: auto auto auto 1fr;
+      }
+      .workspace-hero {
+        border-color: var(--line);
+        padding: 14px;
+      }
+      .workspace-hero h2 {
+        font-size: 38px;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+      }
+      .value-points {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .commandbar {
+        border: 1px solid var(--line);
+        padding: 10px;
+      }
+      .quick-actions button {
+        font-family: "Sora", sans-serif;
+      }
+      .kpis {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .kpi .val {
+        font-size: 18px;
+      }
+      .chat {
+        min-height: 58vh;
+        border-color: var(--line);
+      }
+      .thread {
+        padding: 16px;
+      }
+      .msg {
+        border-radius: 12px;
+        border-color: #dfe4ea;
+      }
+      .msg.user {
+        background: #eef4ff;
+        border-color: #c9dafc;
+      }
+      .composer {
+        background: #ffffff;
+      }
+      .composer textarea {
+        min-height: 56px;
+      }
+      .right-rail .stepper {
+        gap: 10px;
+      }
+      .step {
+        border-style: solid;
+        border-color: #e2e7ee;
+        background: #fafbfd;
+      }
+      .tabs .tab {
+        font-family: "Sora", sans-serif;
+      }
+      .run-builder-compact .toolbar button {
+        flex: 1 1 auto;
+      }
       @media (prefers-reduced-motion: reduce) {
         * {
           transition: none !important;
@@ -475,17 +596,14 @@
           <div class="workspace">
             <aside class="left-rail panel">
               <div class="card">
-                <h3>Run Contexts</h3>
-                <div class="subtle">Saved runs and guided start points</div>
+                <h3>Analyses</h3>
+                <div class="subtle">Recent runs and active context</div>
                 <div id="runContextList" class="list"></div>
               </div>
               <div class="card">
-                <h3>Conversation Threads</h3>
-                <div class="list" id="threadList"></div>
-              </div>
-              <div class="card">
-                <h3>Saved Prompts</h3>
+                <h3>Prompt Library</h3>
                 <div class="list" id="savedPromptList"></div>
+                <div id="threadList" hidden></div>
               </div>
             </aside>
 
@@ -505,8 +623,7 @@
                   <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
                   <button id="quickExecuteBtn" type="button">Execute</button>
                   <button id="quickDeliverBtn" type="button">Deliver</button>
-                  <button id="quickSettingsBtn" type="button">Connections</button>
-                  <button id="quickSkillsBtn" type="button">Skill Builder</button>
+                  <button id="quickSettingsBtn" type="button">Open Settings</button>
                 </div>
                 <form id="commandForm" class="command-line">
                   <kbd>cmd+k</kbd>
@@ -533,7 +650,7 @@
                 <h4>Run Health</h4>
                 <div class="badges" id="runHealthBadges"></div>
               </div>
-              <div class="card stepper">
+              <div class="card stepper run-builder-compact">
                 <h3>Guided Analysis Run</h3>
                 <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
                 <div class="step">2. Model Profile: <select id="runModelSelect"></select></div>
@@ -2072,7 +2189,10 @@
         document.getElementById("quickExecuteBtn").onclick = executeCurrentRun;
         document.getElementById("quickDeliverBtn").onclick = deliverCurrentRun;
         document.getElementById("quickSettingsBtn").onclick = () => openSettingsTab("connections");
-        document.getElementById("quickSkillsBtn").onclick = () => openSettingsTab("skills");
+        const quickSkillsBtn = document.getElementById("quickSkillsBtn");
+        if (quickSkillsBtn) {
+          quickSkillsBtn.onclick = () => openSettingsTab("skills");
+        }
 
         ["runSourceSelect", "runModelSelect", "runReportSelect", "runSkillSelect", "runChannelsInput"].forEach((id) => {
           const el = document.getElementById(id);
