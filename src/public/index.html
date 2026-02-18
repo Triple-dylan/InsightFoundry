@@ -86,6 +86,15 @@
       }
       .brand h1 { margin: 0; font-size: 18px; }
       .subtle { color: var(--muted); font-size: 12px; }
+      .system-alert {
+        margin: 10px 0;
+        border: 1px solid rgba(187, 132, 74, 0.6);
+        border-radius: 10px;
+        background: rgba(255, 243, 228, 0.92);
+        color: #6a4320;
+        padding: 10px;
+        font-size: 12px;
+      }
       .nav {
         display: flex;
         gap: 8px;
@@ -154,6 +163,9 @@
         gap: 10px;
         align-content: start;
       }
+      .right-rail {
+        grid-template-rows: auto auto auto 1fr;
+      }
       .card {
         border: 1px solid var(--line);
         border-radius: 12px;
@@ -189,6 +201,9 @@
       }
       .workspace-hero h2 {
         margin: 0 0 4px;
+      }
+      .workspace-hero p {
+        margin: 0;
       }
       .commandbar {
         border: 1px solid var(--line);
@@ -305,6 +320,13 @@
         padding: 10px;
         min-height: 230px;
         background: rgba(255, 255, 255, 0.62);
+      }
+      .value-points {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
       }
       .onboard {
         border: 1px solid rgba(129, 156, 146, 0.58);
@@ -448,6 +470,7 @@
       </header>
 
       <main class="main">
+        <div id="systemAlert" class="system-alert" hidden></div>
         <section id="route-workspace" class="route active">
           <div class="workspace">
             <aside class="left-rail panel">
@@ -469,7 +492,12 @@
             <section class="center panel">
               <div class="workspace-hero">
                 <h2>Firm Data Copilot</h2>
-                <div class="subtle">Configure in Settings, run analysis in Workspace, monitor delivery in Runs.</div>
+                <p class="subtle">Configure once in Settings, run analysis in Workspace, monitor and retry deliveries in Runs.</p>
+                <ul class="value-points">
+                  <li>Ingest and normalize firm data from common DB and SaaS systems.</li>
+                  <li>Run policy-gated models and skills with evidence and confidence traces.</li>
+                  <li>Generate channel-ready outputs with retries, auditability, and run timelines.</li>
+                </ul>
               </div>
 
               <div class="commandbar">
@@ -498,7 +526,13 @@
                   <button type="submit" class="primary">Send</button>
                 </form>
               </section>
+            </section>
 
+            <aside class="right-rail panel">
+              <div class="card">
+                <h4>Run Health</h4>
+                <div class="badges" id="runHealthBadges"></div>
+              </div>
               <div class="card stepper">
                 <h3>Guided Analysis Run</h3>
                 <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
@@ -522,13 +556,6 @@
                     <pre id="runChannelPreview" class="mono">Delivery summary appears here before execute/deliver.</pre>
                   </div>
                 </div>
-              </div>
-            </section>
-
-            <aside class="right-rail panel">
-              <div class="card">
-                <h4>Run Health</h4>
-                <div class="badges" id="runHealthBadges"></div>
               </div>
               <div class="tabs">
                 <button class="tab active" data-context-tab="summary">Summary</button>
@@ -640,6 +667,18 @@
           throw err;
         }
         return data;
+      }
+
+      function setSystemAlert(message = "") {
+        const alert = document.getElementById("systemAlert");
+        if (!alert) return;
+        if (!message) {
+          alert.hidden = true;
+          alert.textContent = "";
+          return;
+        }
+        alert.hidden = false;
+        alert.textContent = message;
       }
 
       function setRoute(route) {
@@ -829,7 +868,7 @@
           body.innerHTML = `
             <h4>Current Context</h4>
             <div class="subtle">${run ? `Run ${run.id}` : "No run selected"}</div>
-            <div class="item" style="margin-top:8px">${selectedInsight?.summary || appState.latestInsight?.summary || "No insight yet"}</div>
+            <div class="item" style="margin-top:8px">${selectedInsight?.summary || appState.latestInsight?.summary || "No insight yet. Configure connection, model, and report type, then execute a run."}</div>
           `;
         }
 
@@ -1805,19 +1844,38 @@
 
       async function loadAll() {
         if (!appState.tenantId) return;
-
-        const [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes] = await Promise.all([
-          api("/v1/settings"),
-          api("/v1/sources/connections"),
-          api("/v1/models/profiles"),
-          api("/v1/reports/types"),
-          api("/v1/skills/installed"),
-          api("/v1/skills/drafts").catch(() => ({ drafts: [] })),
-          api("/v1/analysis-runs"),
-          api("/v1/insights/latest"),
-          api("/v1/agents/actions/pending"),
-          api("/v1/channels/events")
-        ]);
+        let settingsRes;
+        let connRes;
+        let profilesRes;
+        let reportTypeRes;
+        let skillsRes;
+        let draftsRes;
+        let runsRes;
+        let insightRes;
+        let actionsRes;
+        let channelEventsRes;
+        try {
+          [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes] = await Promise.all([
+            api("/v1/settings"),
+            api("/v1/sources/connections"),
+            api("/v1/models/profiles"),
+            api("/v1/reports/types"),
+            api("/v1/skills/installed"),
+            api("/v1/skills/drafts").catch(() => ({ drafts: [] })),
+            api("/v1/analysis-runs"),
+            api("/v1/insights/latest"),
+            api("/v1/agents/actions/pending"),
+            api("/v1/channels/events")
+          ]);
+          setSystemAlert("");
+        } catch (error) {
+          if (/No route for GET \/v1\/settings/i.test(error.message)) {
+            setSystemAlert("Backend/API mismatch detected. Restart the local server on latest main. Expected settings routes are missing.");
+          } else {
+            setSystemAlert(`Load error: ${error.message}`);
+          }
+          throw error;
+        }
 
         appState.settings = settingsRes.settings;
         appState.connections = connRes.connections || [];
@@ -2058,12 +2116,16 @@
         renderThreadList();
         await initTenant();
         appendMessage("Welcome to InsightFoundry. Start by reviewing onboarding, then create a guided analysis run.");
-        await loadAll();
-        await previewCurrentRunOutput();
+        try {
+          await loadAll();
+          await previewCurrentRunOutput();
+        } catch {
+          // Surface errors via system alert without spamming chat with stack-like noise.
+        }
       }
 
       boot().catch((error) => {
-        appendMessage(`Initialization error: ${error.message}`);
+        setSystemAlert(`Initialization error: ${error.message}`);
       });
     </script>
   </body>
