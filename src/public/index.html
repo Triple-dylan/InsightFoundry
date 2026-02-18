@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Firm Data Copilot MVP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: radial-gradient(circle at 20% 10%, #d7efe7 0%, #f6fbf9 35%, #edf5f3 100%);
+        --panel: #fbfefc;
+        --line: #d3e1dc;
+        --text: #1c2a26;
+        --muted: #5b6c66;
+        --accent: #0a916b;
+        --accent-soft: #d4f2e8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        min-height: 100vh;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 280px 1fr 360px;
+        gap: 12px;
+        padding: 12px;
+        min-height: 100vh;
+      }
+      .panel {
+        background: linear-gradient(180deg, #ffffff, var(--panel));
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        box-shadow: 0 14px 30px rgba(11, 39, 31, 0.08);
+      }
+      h1, h2, h3 { margin: 0; }
+      .brand {
+        font-size: 20px;
+        letter-spacing: 0.02em;
+      }
+      .subtle { color: var(--muted); font-size: 13px; }
+      .nav {
+        margin-top: 20px;
+        display: grid;
+        gap: 8px;
+      }
+      .nav button,
+      .toolbar button,
+      .chat form button {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+        border-radius: 10px;
+        padding: 10px 12px;
+        text-align: left;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        cursor: pointer;
+        transition: transform 120ms ease, background 120ms ease;
+      }
+      .nav button:hover,
+      .toolbar button:hover,
+      .chat form button:hover {
+        transform: translateY(-1px);
+        background: var(--accent-soft);
+      }
+      .center {
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 10px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 8px;
+      }
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .metric .v { font-size: 22px; font-weight: 700; }
+      .chat {
+        display: grid;
+        grid-template-rows: 1fr auto;
+        gap: 10px;
+        min-height: 360px;
+      }
+      .thread {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        overflow: auto;
+        background: #ffffff;
+      }
+      .msg {
+        margin-bottom: 10px;
+        padding: 9px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        font-size: 14px;
+      }
+      .msg.user { background: #f0faf7; }
+      .msg.ai { background: #ffffff; }
+      .chat form {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 64px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        padding: 10px;
+        font: inherit;
+      }
+      .side-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+        max-height: 220px;
+        overflow: auto;
+      }
+      .item {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 9px;
+        font-size: 13px;
+        background: #fff;
+      }
+      .tag {
+        display: inline-flex;
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 11px;
+        background: var(--accent-soft);
+        color: #0e6e53;
+        margin-right: 6px;
+      }
+      @media (max-width: 1120px) {
+        .shell { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <h1 class="brand">Firm Data Copilot</h1>
+        <p class="subtle">Policy-gated AI agency workspace</p>
+        <div class="nav">
+          <button id="syncMarketing">Sync marketing connector</button>
+          <button id="syncFinance">Sync finance connector</button>
+          <button id="runAgent">Run agent job</button>
+          <button id="makeSchedule">Create hourly report schedule</button>
+          <button id="createSource">Add source connection</button>
+          <button id="syncSource">Sync first source</button>
+          <button id="installSkill">Install marketing skill</button>
+          <button id="runSkill">Run skill pack</button>
+        </div>
+        <p class="subtle" id="tenantLabel"></p>
+      </section>
+
+      <section class="panel center">
+        <div>
+          <h2>Copilot + Dashboards</h2>
+          <p class="subtle">Cross-domain insights and action proposals</p>
+        </div>
+
+        <div class="metrics" id="metrics"></div>
+
+        <section class="chat">
+          <div class="thread" id="thread"></div>
+          <form id="chatForm">
+            <textarea id="chatInput" placeholder="Ask for a forecast or anomaly scan..."></textarea>
+            <button type="submit">Run model</button>
+          </form>
+        </section>
+
+        <div class="toolbar">
+          <button id="generateReport">Generate report now</button>
+          <button id="refreshAudit">Refresh audit</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Actions + Audit</h3>
+        <p class="subtle">Pending actions, latest insight, and compliance trail</p>
+
+        <div>
+          <span class="tag">Source connections</span>
+          <div class="side-list" id="sources"></div>
+        </div>
+
+        <div>
+          <span class="tag">Installed skills</span>
+          <div class="side-list" id="skills"></div>
+        </div>
+
+        <div>
+          <span class="tag">Pending actions</span>
+          <div class="side-list" id="actions"></div>
+        </div>
+
+        <div>
+          <span class="tag">Latest insight</span>
+          <div class="side-list" id="insight"></div>
+        </div>
+
+        <div>
+          <span class="tag">Audit events</span>
+          <div class="side-list" id="audit"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const demoTenantId = "__DEMO_TENANT_ID__";
+      let tenantId = demoTenantId;
+
+      const headers = () => ({
+        "content-type": "application/json",
+        "x-tenant-id": tenantId,
+        "x-user-id": "ui-user",
+        "x-user-role": "owner"
+      });
+
+      const thread = document.getElementById("thread");
+
+      function appendMessage(text, kind = "ai") {
+        const div = document.createElement("div");
+        div.className = `msg ${kind}`;
+        div.textContent = text;
+        thread.appendChild(div);
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      async function initTenant() {
+        const res = await fetch("/v1/tenants");
+        const data = await res.json();
+        if (!tenantId && data.tenants.length) {
+          tenantId = data.tenants[0].id;
+        }
+        document.getElementById("tenantLabel").textContent = `Tenant: ${tenantId}`;
+      }
+
+      async function loadMetrics() {
+        const metricIds = ["revenue", "profit", "spend"];
+        const container = document.getElementById("metrics");
+        container.innerHTML = "";
+        for (const metricId of metricIds) {
+          const res = await fetch(`/v1/metrics/query?metricId=${metricId}&grain=week`, { headers: headers() });
+          const data = await res.json();
+          const card = document.createElement("div");
+          card.className = "metric";
+          card.innerHTML = `<div class="subtle">${metricId}</div><div class="v">${Math.round(data.summary?.total ?? 0)}</div>`;
+          container.appendChild(card);
+        }
+      }
+
+      async function loadActions() {
+        const res = await fetch("/v1/agents/actions/pending", { headers: headers() });
+        const data = await res.json();
+        const box = document.getElementById("actions");
+        box.innerHTML = "";
+        if (!data.actions?.length) {
+          box.innerHTML = `<div class="item">No pending actions</div>`;
+          return;
+        }
+        data.actions.forEach((a) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.textContent = `${a.actionType} (${a.policyDecision}) confidence=${a.confidence}`;
+          box.appendChild(el);
+        });
+      }
+
+      async function loadSources() {
+        const res = await fetch("/v1/sources/connections", { headers: headers() });
+        const data = await res.json();
+        const box = document.getElementById("sources");
+        box.innerHTML = "";
+        if (!data.connections?.length) {
+          box.innerHTML = `<div class="item">No source connections</div>`;
+          return;
+        }
+        data.connections.forEach((source) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.textContent = `${source.sourceType} (${source.mode}) - ${source.status}`;
+          box.appendChild(el);
+        });
+      }
+
+      async function loadSkills() {
+        const res = await fetch("/v1/skills/installed", { headers: headers() });
+        const data = await res.json();
+        const box = document.getElementById("skills");
+        box.innerHTML = "";
+        if (!data.installed?.length) {
+          box.innerHTML = `<div class="item">No installed skills</div>`;
+          return;
+        }
+        data.installed.forEach((skill) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.textContent = `${skill.id} - ${skill.active ? "active" : "inactive"}`;
+          box.appendChild(el);
+        });
+      }
+
+      async function loadLatestInsight() {
+        const res = await fetch("/v1/insights/latest", { headers: headers() });
+        const data = await res.json();
+        const box = document.getElementById("insight");
+        box.innerHTML = "";
+        if (!data.insight) {
+          box.innerHTML = `<div class="item">No insight yet</div>`;
+          return;
+        }
+        const el = document.createElement("div");
+        el.className = "item";
+        el.textContent = `${data.insight.summary} (confidence ${data.insight.confidence})`;
+        box.appendChild(el);
+      }
+
+      async function loadAudit() {
+        const res = await fetch("/v1/audit/events", { headers: headers() });
+        const data = await res.json();
+        const box = document.getElementById("audit");
+        box.innerHTML = "";
+        const events = (data.events || []).slice(-8).reverse();
+        events.forEach((e) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.textContent = `${e.action} @ ${new Date(e.at).toLocaleTimeString()}`;
+          box.appendChild(el);
+        });
+      }
+
+      async function runModel(promptText) {
+        const objective = /anomaly/i.test(promptText) ? "anomaly" : "forecast";
+        const body = { objective, outputMetricIds: ["revenue"], horizonDays: 7 };
+        const res = await fetch("/v1/models/run", { method: "POST", headers: headers(), body: JSON.stringify(body) });
+        const data = await res.json();
+        appendMessage(data.insight.summary, "ai");
+        await Promise.all([loadActions(), loadLatestInsight(), loadAudit()]);
+      }
+
+      document.getElementById("chatForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = document.getElementById("chatInput");
+        const text = input.value.trim();
+        if (!text) return;
+        appendMessage(text, "user");
+        input.value = "";
+        await runModel(text);
+      });
+
+      document.getElementById("syncMarketing").addEventListener("click", async () => {
+        await fetch("/v1/connectors/google_ads/sync", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ domain: "marketing", periodDays: 30 })
+        });
+        appendMessage("Marketing connector synced.");
+        await Promise.all([loadMetrics(), loadAudit()]);
+      });
+
+      document.getElementById("syncFinance").addEventListener("click", async () => {
+        await fetch("/v1/connectors/quickbooks/sync", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ domain: "finance", periodDays: 30 })
+        });
+        appendMessage("Finance connector synced.");
+        await Promise.all([loadMetrics(), loadAudit()]);
+      });
+
+      document.getElementById("runAgent").addEventListener("click", async () => {
+        await fetch("/v1/agents/jobs", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ jobType: "run_model", objective: "forecast", outputMetricIds: ["revenue"] })
+        });
+        appendMessage("Agent job executed.");
+        await Promise.all([loadActions(), loadLatestInsight(), loadAudit()]);
+      });
+
+      document.getElementById("generateReport").addEventListener("click", async () => {
+        await fetch("/v1/reports/generate", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ title: "Executive Digest", channels: ["email", "slack"], metricIds: ["revenue", "profit", "spend"] })
+        });
+        appendMessage("Report generated and delivered.");
+        await loadAudit();
+      });
+
+      document.getElementById("makeSchedule").addEventListener("click", async () => {
+        await fetch("/v1/reports/schedules", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ name: "Hourly Digest", intervalMinutes: 60, channels: ["email", "slack", "telegram"] })
+        });
+        appendMessage("Hourly report schedule created.");
+        await loadAudit();
+      });
+
+      document.getElementById("createSource").addEventListener("click", async () => {
+        await fetch("/v1/sources/connections", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            sourceType: "hubspot",
+            mode: "hybrid",
+            auth: { token: "demo-hubspot-token" },
+            syncPolicy: { intervalMinutes: 120, backfillDays: 30 }
+          })
+        });
+        appendMessage("HubSpot source connection added.");
+        await Promise.all([loadSources(), loadAudit()]);
+      });
+
+      document.getElementById("syncSource").addEventListener("click", async () => {
+        const list = await fetch("/v1/sources/connections", { headers: headers() }).then((r) => r.json());
+        const first = list.connections?.[0];
+        if (!first) {
+          appendMessage("No source connection available to sync.");
+          return;
+        }
+        await fetch(`/v1/sources/connections/${encodeURIComponent(first.id)}/sync`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ periodDays: 30 })
+        });
+        appendMessage(`Source ${first.sourceType} synced.`);
+        await Promise.all([loadMetrics(), loadSources(), loadAudit()]);
+      });
+
+      document.getElementById("installSkill").addEventListener("click", async () => {
+        await fetch("/v1/skills/install", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ skillId: "marketing-optimizer", active: true })
+        });
+        appendMessage("Marketing skill installed.");
+        await Promise.all([loadSkills(), loadAudit()]);
+      });
+
+      document.getElementById("runSkill").addEventListener("click", async () => {
+        const res = await fetch("/v1/skills/run", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({
+            intent: "marketing_optimization",
+            channel: "web",
+            requestedTools: ["model.run", "reports.generate"],
+            estimatedTokens: 1200,
+            timeoutMs: 3000,
+            generateReport: true,
+            channels: ["email", "slack"]
+          })
+        });
+        const data = await res.json();
+        appendMessage(`Skill run complete: ${data.run.skillId} (${data.run.status}).`);
+        await Promise.all([loadActions(), loadLatestInsight(), loadSkills(), loadAudit()]);
+      });
+
+      document.getElementById("refreshAudit").addEventListener("click", loadAudit);
+
+      async function boot() {
+        await initTenant();
+        appendMessage("Workspace ready. Ask for forecast or anomaly analysis.");
+        await Promise.all([loadMetrics(), loadSources(), loadSkills(), loadActions(), loadLatestInsight(), loadAudit()]);
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
