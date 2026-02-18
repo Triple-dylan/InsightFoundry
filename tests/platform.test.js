@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createPlatform } from "../src/app.js";
 
 async function startServer() {
-  const platform = createPlatform({ seedDemo: false, startBackground: false });
+  const platform = await createPlatform({ seedDemo: false, startBackground: false });
   await new Promise((resolve) => platform.server.listen(0, "127.0.0.1", resolve));
   const addr = platform.server.address();
   const baseUrl = `http://127.0.0.1:${addr.port}`;
@@ -160,11 +160,23 @@ test("report generation returns deliveries and is queryable", async () => {
     const reportRes = await fetch(`${ctx.baseUrl}/v1/reports/generate`, {
       method: "POST",
       headers: tenantHeaders(tenant.id),
-      body: JSON.stringify({ channels: ["email", "slack", "telegram"], metricIds: ["revenue", "profit"] })
+      body: JSON.stringify({
+        channels: ["email", "slack", "telegram"],
+        metricIds: ["revenue", "profit"],
+        channelTemplates: {
+          slack: "[{{channel}}] {{reportTitle}} | {{reportSummary}} | confidence={{confidence}}"
+        },
+        channelTemplateContext: {
+          runId: "manual_report",
+          confidence: 0.88
+        }
+      })
     });
     assert.equal(reportRes.status, 201);
     const reportBody = await reportRes.json();
     assert.equal(reportBody.deliveryEvents.length, 3);
+    const slackEvent = reportBody.deliveryEvents.find((event) => event.channel === "slack");
+    assert.ok(slackEvent.payload.message.includes("confidence=0.88"));
 
     const channelsRes = await fetch(`${ctx.baseUrl}/v1/channels/events`, { headers: tenantHeaders(tenant.id) });
     const channelsBody = await channelsRes.json();
@@ -198,6 +210,24 @@ test("source connection lifecycle supports create, test, sync, and run history",
     const connection = connectionBody.connection;
     assert.equal(connection.sourceType, "postgres");
     assert.ok(connection.authRef.startsWith("secret_"));
+    assert.equal(connection.syncPolicy.freshnessSlaHours, 24);
+    assert.equal(connection.qualityPolicy.minQualityScore, 0.75);
+
+    const patchRes = await fetch(`${ctx.baseUrl}/v1/sources/connections/${connection.id}`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        metadata: { owner: "ops-team" },
+        syncPolicy: { freshnessSlaHours: 12 },
+        qualityPolicy: { minQualityScore: 0.9, blockModelRun: true }
+      })
+    });
+    assert.equal(patchRes.status, 200);
+    const patched = (await patchRes.json()).connection;
+    assert.equal(patched.metadata.owner, "ops-team");
+    assert.equal(patched.syncPolicy.freshnessSlaHours, 12);
+    assert.equal(patched.qualityPolicy.minQualityScore, 0.9);
+    assert.equal(patched.qualityPolicy.blockModelRun, true);
 
     const testRes = await fetch(`${ctx.baseUrl}/v1/sources/connections/${connection.id}/test`, {
       method: "POST",
@@ -216,6 +246,8 @@ test("source connection lifecycle supports create, test, sync, and run history",
     const syncBody = await syncRes.json();
     assert.equal(syncBody.syncStatus, "success");
     assert.ok(syncBody.checkpoint.cursor);
+    assert.ok(Array.isArray(syncBody.diagnostics.qualityChecks));
+    assert.ok(syncBody.diagnostics.qualityChecks.length > 0);
 
     const runsRes = await fetch(`${ctx.baseUrl}/v1/sources/connections/${connection.id}/runs`, {
       headers: tenantHeaders(tenant.id)
@@ -358,6 +390,8 @@ test("skill pack install and run supports activation state and guardrails", asyn
     assert.equal(runRes.status, 200);
     const runBody = await runRes.json();
     assert.equal(runBody.run.skillId, skillId);
+    assert.ok(Array.isArray(runBody.run.trace.guardrails));
+    assert.ok(runBody.run.trace.guardrails.length > 0);
 
     const deactivateRes = await fetch(`${ctx.baseUrl}/v1/skills/${encodeURIComponent(skillId)}/deactivate`, {
       method: "POST",
@@ -378,6 +412,266 @@ test("skill pack install and run supports activation state and guardrails", asyn
       })
     });
     assert.equal(runAfterDeactivate.status, 400);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("settings and profile/report endpoints are configurable", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Configurable Co");
+
+    const settingsRes = await fetch(`${ctx.baseUrl}/v1/settings`, { headers: tenantHeaders(tenant.id) });
+    assert.equal(settingsRes.status, 200);
+    const settingsBody = await settingsRes.json();
+    assert.equal(settingsBody.settings.general.name, "Configurable Co");
+
+    const patchGeneral = await fetch(`${ctx.baseUrl}/v1/settings/general`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ name: "Configurable Co 2", timezone: "UTC", locale: "en-US" })
+    });
+    assert.equal(patchGeneral.status, 200);
+
+    const profileCreate = await fetch(`${ctx.baseUrl}/v1/models/profiles`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ name: "Ops Forecast", objective: "forecast", targetMetricId: "revenue", horizonDays: 12 })
+    });
+    assert.equal(profileCreate.status, 201);
+    const profileBody = await profileCreate.json();
+
+    const activateProfile = await fetch(`${ctx.baseUrl}/v1/models/profiles/${profileBody.profile.id}/activate`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(activateProfile.status, 200);
+
+    const reportTypeCreate = await fetch(`${ctx.baseUrl}/v1/reports/types`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Ops Digest",
+        sections: ["kpi_snapshot", "narrative", "actions"],
+        defaultChannels: ["email", "slack"],
+        defaultFormat: "pdf"
+      })
+    });
+    assert.equal(reportTypeCreate.status, 201);
+    const reportType = (await reportTypeCreate.json()).reportType;
+
+    const reportTypesRes = await fetch(`${ctx.baseUrl}/v1/reports/types`, { headers: tenantHeaders(tenant.id) });
+    const reportTypesBody = await reportTypesRes.json();
+    assert.ok(reportTypesBody.types.some((item) => item.name === "Founder Growth and Cash Cockpit"));
+
+    const preview = await fetch(`${ctx.baseUrl}/v1/reports/types/${reportType.id}/preview`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(preview.status, 200);
+    const previewBody = await preview.json();
+    assert.match(previewBody.preview, /Preview/);
+
+    const deliveryPreview = await fetch(`${ctx.baseUrl}/v1/reports/types/${reportType.id}/delivery-preview`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        channels: ["email", "slack"],
+        reportTitle: "Ops Digest",
+        reportSummary: "Summary",
+        context: { runId: "run_x", confidence: 0.8 }
+      })
+    });
+    assert.equal(deliveryPreview.status, 200);
+    const deliveryPreviewBody = await deliveryPreview.json();
+    assert.equal(deliveryPreviewBody.previews.length, 2);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("skill draft workflow validates and publishes to installed skills", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Skill Draft Co");
+
+    const createDraft = await fetch(`${ctx.baseUrl}/v1/skills/drafts`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        manifest: {
+          id: "tenant-custom-skill",
+          version: "1.0.0",
+          name: "Tenant Custom Skill",
+          description: "Custom tenant skill",
+          triggers: { intents: ["custom_intent"], channels: ["web", "api"] },
+          tools: [{ id: "model.run", allow: true }],
+          guardrails: { confidenceMin: 0.7, humanApprovalFor: ["adjust_budget"], budgetCapUsd: 5000, tokenBudget: 2000, timeBudgetMs: 8000, killSwitch: false },
+          prompts: { system: "Act as tenant custom operator." },
+          schedules: []
+        }
+      })
+    });
+    assert.equal(createDraft.status, 201);
+    const draftId = (await createDraft.json()).draft.draftId;
+
+    const validate = await fetch(`${ctx.baseUrl}/v1/skills/drafts/${draftId}/validate`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(validate.status, 200);
+    const validateBody = await validate.json();
+    assert.equal(validateBody.result.status, "valid");
+
+    const publish = await fetch(`${ctx.baseUrl}/v1/skills/drafts/${draftId}/publish`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ active: true })
+    });
+    assert.equal(publish.status, 201);
+    const publishBody = await publish.json();
+    assert.ok(publishBody.install.id.includes("tenant-custom-skill@1.0.0"));
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("analysis run quality gate can block model execution", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Quality Gate Co");
+
+    const connectionRes = await fetch(`${ctx.baseUrl}/v1/sources/connections`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        sourceType: "google_ads",
+        mode: "hybrid",
+        auth: { token: "t" },
+        qualityPolicy: { minQualityScore: 1, blockModelRun: true }
+      })
+    });
+    const connectionId = (await connectionRes.json()).connection.id;
+
+    const profilesRes = await fetch(`${ctx.baseUrl}/v1/models/profiles`, { headers: tenantHeaders(tenant.id) });
+    const modelProfileId = (await profilesRes.json()).profiles[0].id;
+
+    const reportTypesRes = await fetch(`${ctx.baseUrl}/v1/reports/types`, { headers: tenantHeaders(tenant.id) });
+    const reportTypeId = (await reportTypesRes.json()).types[0].id;
+
+    const runCreate = await fetch(`${ctx.baseUrl}/v1/analysis-runs`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        sourceConnectionId: connectionId,
+        modelProfileId,
+        reportTypeId
+      })
+    });
+    const runId = (await runCreate.json()).run.id;
+
+    const runExecute = await fetch(`${ctx.baseUrl}/v1/analysis-runs/${runId}/execute`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ forceSync: true })
+    });
+    assert.equal(runExecute.status, 400);
+    const errorBody = await runExecute.json();
+    assert.match(errorBody.error, /quality gate failed/i);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("guided analysis run executes end-to-end with artifacts", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Runflow Co");
+
+    const connectionRes = await fetch(`${ctx.baseUrl}/v1/sources/connections`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ sourceType: "google_ads", mode: "hybrid", auth: { token: "t" } })
+    });
+    const connectionId = (await connectionRes.json()).connection.id;
+
+    const profilesRes = await fetch(`${ctx.baseUrl}/v1/models/profiles`, { headers: tenantHeaders(tenant.id) });
+    const modelProfileId = (await profilesRes.json()).profiles[0].id;
+
+    const reportTypesRes = await fetch(`${ctx.baseUrl}/v1/reports/types`, { headers: tenantHeaders(tenant.id) });
+    const reportTypeId = (await reportTypesRes.json()).types[0].id;
+
+    const runCreate = await fetch(`${ctx.baseUrl}/v1/analysis-runs`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        sourceConnectionId: connectionId,
+        modelProfileId,
+        reportTypeId,
+        channels: ["email", "slack"]
+      })
+    });
+    assert.equal(runCreate.status, 201);
+    const runId = (await runCreate.json()).run.id;
+
+    const runExecute = await fetch(`${ctx.baseUrl}/v1/analysis-runs/${runId}/execute`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ forceSync: true })
+    });
+    assert.equal(runExecute.status, 200);
+    const executed = (await runExecute.json()).run;
+    assert.equal(executed.status, "completed");
+    assert.ok(executed.artifacts.insightId);
+    assert.ok(executed.artifacts.reportId);
+
+    const insightRes = await fetch(`${ctx.baseUrl}/v1/insights/${executed.artifacts.insightId}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(insightRes.status, 200);
+    const insightBody = await insightRes.json();
+    assert.equal(insightBody.insight.id, executed.artifacts.insightId);
+
+    const reportRes = await fetch(`${ctx.baseUrl}/v1/reports/${executed.artifacts.reportId}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(reportRes.status, 200);
+    const reportBody = await reportRes.json();
+    assert.equal(reportBody.report.id, executed.artifacts.reportId);
+
+    const runDeliver = await fetch(`${ctx.baseUrl}/v1/analysis-runs/${runId}/deliver`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ channels: ["email", "telegram"] })
+    });
+    assert.equal(runDeliver.status, 200);
+    const deliveredBody = await runDeliver.json();
+    assert.equal(deliveredBody.events.length, 2);
+    const telegramEvent = deliveredBody.events.find((event) => event.channel === "telegram");
+    assert.equal(telegramEvent.status, "failed");
+
+    await fetch(`${ctx.baseUrl}/v1/settings/channels`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        telegram: {
+          enabled: true,
+          botTokenRef: "bot_ref",
+          chatId: "chat_1"
+        }
+      })
+    });
+
+    const retry = await fetch(`${ctx.baseUrl}/v1/channels/events/${telegramEvent.id}/retry`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({})
+    });
+    assert.equal(retry.status, 200);
+    const retryBody = await retry.json();
+    assert.equal(retryBody.event.status, "delivered");
+    assert.ok(Number(retryBody.event.attemptCount) >= 2);
   } finally {
     await ctx.stop();
   }

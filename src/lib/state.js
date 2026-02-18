@@ -52,7 +52,17 @@ export function createState() {
     liveQueryCache: new Map(),
     materializationRuns: [],
     installedSkills: [],
+    skillDrafts: [],
     skillRuns: [],
+    modelProfiles: [],
+    reportTypes: [],
+    analysisRuns: [],
+    settingsByTenant: new Map(),
+    featureFlags: {
+      ui_rehaul_enabled: true,
+      runs_engine_enabled: true,
+      skills_builder_v2_enabled: true
+    },
     modelRuns: [],
     insights: [],
     reports: [],

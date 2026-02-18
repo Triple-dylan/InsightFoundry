@@ -3,490 +3,2068 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Firm Data Copilot MVP</title>
+    <title>InsightFoundry</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
       :root {
-        --bg: radial-gradient(circle at 20% 10%, #d7efe7 0%, #f6fbf9 35%, #edf5f3 100%);
-        --panel: #fbfefc;
-        --line: #d3e1dc;
-        --text: #1c2a26;
-        --muted: #5b6c66;
-        --accent: #0a916b;
-        --accent-soft: #d4f2e8;
+        --bg: radial-gradient(circle at 10% 12%, #d8ece6 0%, transparent 42%),
+          radial-gradient(circle at 86% 18%, #d8e7f8 0%, transparent 39%),
+          linear-gradient(170deg, #eef4f2 0%, #f4f7fb 44%, #e6ecf6 100%);
+        --panel: rgba(247, 252, 250, 0.56);
+        --panel-solid: #fcfffe;
+        --line: rgba(87, 106, 99, 0.24);
+        --line-strong: rgba(62, 82, 74, 0.4);
+        --text: #10201c;
+        --muted: #4f6560;
+        --accent: #0d8b69;
+        --accent-deep: #085e47;
+        --accent-soft: rgba(209, 241, 231, 0.72);
+        --shadow: 0 18px 40px rgba(16, 41, 35, 0.12);
+        --glass-blur: 18px;
+        --radius-lg: 16px;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "Space Grotesk", "Avenir Next", sans-serif;
+        font-family: "Sora", "Avenir Next", sans-serif;
         color: var(--text);
         background: var(--bg);
         min-height: 100vh;
+        position: relative;
       }
-      .shell {
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        z-index: -1;
+        border-radius: 999px;
+        filter: blur(24px);
+        pointer-events: none;
+      }
+      body::before {
+        width: min(42vw, 560px);
+        height: min(42vw, 560px);
+        top: -120px;
+        left: -80px;
+        background: rgba(186, 228, 215, 0.45);
+      }
+      body::after {
+        width: min(36vw, 460px);
+        height: min(36vw, 460px);
+        right: -70px;
+        top: 26vh;
+        background: rgba(178, 205, 234, 0.34);
+      }
+      .app {
         display: grid;
-        grid-template-columns: 280px 1fr 360px;
-        gap: 12px;
-        padding: 12px;
+        grid-template-rows: 64px 1fr;
         min-height: 100vh;
       }
-      .panel {
-        background: linear-gradient(180deg, #ffffff, var(--panel));
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 14px;
-        box-shadow: 0 14px 30px rgba(11, 39, 31, 0.08);
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(250, 255, 253, 0.52);
+        backdrop-filter: blur(var(--glass-blur));
       }
-      h1, h2, h3 { margin: 0; }
       .brand {
-        font-size: 20px;
-        letter-spacing: 0.02em;
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
-      .subtle { color: var(--muted); font-size: 13px; }
+      .brand-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, #2ed1a0, #08745a);
+        box-shadow: 0 0 0 6px #d7f1e8;
+      }
+      .brand h1 { margin: 0; font-size: 18px; }
+      .subtle { color: var(--muted); font-size: 12px; }
       .nav {
-        margin-top: 20px;
-        display: grid;
+        display: flex;
         gap: 8px;
       }
       .nav button,
-      .toolbar button,
-      .chat form button {
+      button,
+      .chip,
+      .tab {
         border: 1px solid var(--line);
-        background: #fff;
+        background: rgba(255, 255, 255, 0.54);
         color: var(--text);
         border-radius: 10px;
-        padding: 10px 12px;
-        text-align: left;
-        font-family: "IBM Plex Mono", monospace;
-        font-size: 12px;
+        padding: 8px 12px;
         cursor: pointer;
-        transition: transform 120ms ease, background 120ms ease;
+        font-size: 12px;
+        font-family: "JetBrains Mono", monospace;
+        transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
       }
       .nav button:hover,
-      .toolbar button:hover,
-      .chat form button:hover {
-        transform: translateY(-1px);
+      button:hover,
+      .chip:hover,
+      .tab:hover {
+        border-color: var(--line-strong);
+      }
+      .nav button.active,
+      .tab.active,
+      button.primary,
+      .chip.active {
         background: var(--accent-soft);
+        border-color: rgba(94, 158, 136, 0.54);
+        color: var(--accent-deep);
       }
-      .center {
-        display: grid;
-        grid-template-rows: auto auto 1fr auto;
-        gap: 10px;
+      button.primary {
+        font-weight: 600;
       }
-      .toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
+      .main {
+        padding: 12px;
       }
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 8px;
-      }
-      .metric {
+      .route { display: none; }
+      .route.active { display: block; }
+      .panel {
+        background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 10px;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(var(--glass-blur));
       }
-      .metric .v { font-size: 22px; font-weight: 700; }
-      .chat {
+      .workspace {
         display: grid;
-        grid-template-rows: 1fr auto;
+        grid-template-columns: 250px 1fr 330px;
         gap: 10px;
-        min-height: 360px;
+        min-height: calc(100vh - 90px);
       }
-      .thread {
+      .left-rail,
+      .center,
+      .right-rail,
+      .settings-layout,
+      .runs-layout {
+        padding: 12px;
+      }
+      .left-rail,
+      .right-rail,
+      .settings-nav,
+      .runs-list {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .card {
         border: 1px solid var(--line);
         border-radius: 12px;
-        padding: 12px;
-        overflow: auto;
-        background: #ffffff;
-      }
-      .msg {
-        margin-bottom: 10px;
-        padding: 9px 10px;
-        border-radius: 10px;
-        border: 1px solid var(--line);
-        font-size: 14px;
-      }
-      .msg.user { background: #f0faf7; }
-      .msg.ai { background: #ffffff; }
-      .chat form {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 8px;
-      }
-      textarea {
-        resize: vertical;
-        min-height: 64px;
-        border-radius: 10px;
-        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.58);
         padding: 10px;
-        font: inherit;
       }
-      .side-list {
+      .card h3,
+      .card h4 { margin: 0 0 6px; }
+      .list {
         display: grid;
-        gap: 8px;
-        margin-top: 10px;
-        max-height: 220px;
+        gap: 7px;
+        max-height: 240px;
         overflow: auto;
       }
       .item {
         border: 1px solid var(--line);
         border-radius: 10px;
-        padding: 9px;
-        font-size: 13px;
-        background: #fff;
+        padding: 8px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.74);
       }
-      .tag {
-        display: inline-flex;
-        border-radius: 999px;
-        padding: 3px 8px;
+      .center {
+        display: grid;
+        grid-template-rows: auto auto auto 1fr auto;
+        gap: 10px;
+      }
+      .workspace-hero {
+        border: 1px solid var(--line);
+        background: linear-gradient(120deg, rgba(245, 252, 249, 0.78), rgba(238, 245, 253, 0.74));
+        border-radius: 12px;
+        padding: 10px;
+        backdrop-filter: blur(12px);
+      }
+      .workspace-hero h2 {
+        margin: 0 0 4px;
+      }
+      .commandbar {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(249, 254, 251, 0.65);
+        display: grid;
+        gap: 8px;
+      }
+      .quick-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .quick-actions button {
+        background: rgba(255, 255, 255, 0.66);
+      }
+      .command-line {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+      kbd {
+        font-family: "JetBrains Mono", monospace;
         font-size: 11px;
-        background: var(--accent-soft);
-        color: #0e6e53;
-        margin-right: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 2px 6px;
+        background: rgba(255, 255, 255, 0.66);
+      }
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .kpi {
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 8px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+      .kpi .val {
+        font-size: 22px;
+        font-weight: 700;
+      }
+      .chat {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.66);
+        display: grid;
+        grid-template-rows: 1fr auto;
+        min-height: 290px;
+      }
+      .thread {
+        padding: 12px;
+        overflow: auto;
+      }
+      .msg {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px;
+        margin-bottom: 8px;
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.74);
+      }
+      .msg.user {
+        background: rgba(228, 248, 240, 0.82);
+        border-color: rgba(113, 161, 144, 0.45);
+      }
+      .composer {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 10px;
+        border-top: 1px solid var(--line);
+        background: rgba(249, 254, 251, 0.75);
+      }
+      textarea,
+      input,
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px;
+        font: inherit;
+        font-size: 13px;
+        background: rgba(255, 255, 255, 0.82);
+      }
+      .stepper {
+        display: grid;
+        gap: 8px;
+      }
+      .step {
+        border: 1px dashed rgba(129, 156, 146, 0.66);
+        border-radius: 10px;
+        padding: 8px;
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.54);
+      }
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .context-body {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        min-height: 230px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+      .onboard {
+        border: 1px solid rgba(129, 156, 146, 0.58);
+        background: rgba(240, 250, 245, 0.75);
+        border-radius: 10px;
+        padding: 8px;
+        font-size: 12px;
+      }
+      .settings-layout {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 10px;
+        min-height: calc(100vh - 90px);
+      }
+      .settings-nav .tab,
+      .runs-list .item,
+      .item.clickable {
+        text-align: left;
+      }
+      .settings-content,
+      .runs-detail {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+      .settings-section {
+        display: none;
+      }
+      .settings-section.active {
+        display: grid;
+        gap: 10px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .form-grid .full {
+        grid-column: 1 / -1;
+      }
+      .runs-layout {
+        display: grid;
+        grid-template-columns: 300px 1fr;
+        gap: 10px;
+        min-height: calc(100vh - 90px);
+      }
+      .timeline {
+        display: grid;
+        gap: 8px;
+      }
+      .timeline .item {
+        border-left: 3px solid rgba(131, 163, 151, 0.72);
+      }
+      .status {
+        font-size: 11px;
+        border-radius: 999px;
+        padding: 3px 7px;
+        border: 1px solid rgba(129, 156, 146, 0.58);
+        background: rgba(245, 251, 249, 0.88);
+      }
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .badge {
+        font-size: 11px;
+        border-radius: 999px;
+        padding: 4px 8px;
+        border: 1px solid rgba(129, 156, 146, 0.6);
+        background: rgba(244, 251, 248, 0.9);
+      }
+      .badge.good {
+        border-color: rgba(99, 170, 139, 0.64);
+        background: rgba(229, 246, 238, 0.92);
+      }
+      .badge.warn {
+        border-color: rgba(187, 160, 95, 0.65);
+        background: rgba(254, 247, 229, 0.95);
+      }
+      .badge.bad {
+        border-color: rgba(186, 114, 114, 0.64);
+        background: rgba(253, 236, 236, 0.94);
+      }
+      .preview-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .preview-panel {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.74);
+        padding: 8px;
+      }
+      .preview-panel pre {
+        margin: 0;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+      .evidence-list {
+        display: grid;
+        gap: 8px;
+      }
+      .mono { font-family: "JetBrains Mono", monospace; }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
       }
       @media (max-width: 1120px) {
-        .shell { grid-template-columns: 1fr; }
+        .workspace,
+        .settings-layout,
+        .runs-layout {
+          grid-template-columns: 1fr;
+        }
+        .command-line {
+          grid-template-columns: 1fr;
+        }
+        .preview-grid {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
   <body>
-    <main class="shell">
-      <section class="panel">
-        <h1 class="brand">Firm Data Copilot</h1>
-        <p class="subtle">Policy-gated AI agency workspace</p>
-        <div class="nav">
-          <button id="syncMarketing">Sync marketing connector</button>
-          <button id="syncFinance">Sync finance connector</button>
-          <button id="runAgent">Run agent job</button>
-          <button id="makeSchedule">Create hourly report schedule</button>
-          <button id="createSource">Add source connection</button>
-          <button id="syncSource">Sync first source</button>
-          <button id="installSkill">Install marketing skill</button>
-          <button id="runSkill">Run skill pack</button>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <div>
+            <h1>InsightFoundry</h1>
+            <div class="subtle" id="tenantLabel">Tenant: loading...</div>
+          </div>
         </div>
-        <p class="subtle" id="tenantLabel"></p>
-      </section>
+        <nav class="nav">
+          <button data-route-target="workspace" class="active">Workspace</button>
+          <button data-route-target="settings">Settings</button>
+          <button data-route-target="runs">Runs</button>
+        </nav>
+      </header>
 
-      <section class="panel center">
-        <div>
-          <h2>Copilot + Dashboards</h2>
-          <p class="subtle">Cross-domain insights and action proposals</p>
-        </div>
+      <main class="main">
+        <section id="route-workspace" class="route active">
+          <div class="workspace">
+            <aside class="left-rail panel">
+              <div class="card">
+                <h3>Run Contexts</h3>
+                <div class="subtle">Saved runs and guided start points</div>
+                <div id="runContextList" class="list"></div>
+              </div>
+              <div class="card">
+                <h3>Conversation Threads</h3>
+                <div class="list" id="threadList"></div>
+              </div>
+              <div class="card">
+                <h3>Saved Prompts</h3>
+                <div class="list" id="savedPromptList"></div>
+              </div>
+            </aside>
 
-        <div class="metrics" id="metrics"></div>
+            <section class="center panel">
+              <div class="workspace-hero">
+                <h2>Firm Data Copilot</h2>
+                <div class="subtle">Configure in Settings, run analysis in Workspace, monitor delivery in Runs.</div>
+              </div>
 
-        <section class="chat">
-          <div class="thread" id="thread"></div>
-          <form id="chatForm">
-            <textarea id="chatInput" placeholder="Ask for a forecast or anomaly scan..."></textarea>
-            <button type="submit">Run model</button>
-          </form>
+              <div class="commandbar">
+                <div class="quick-actions">
+                  <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
+                  <button id="quickExecuteBtn" type="button">Execute</button>
+                  <button id="quickDeliverBtn" type="button">Deliver</button>
+                  <button id="quickSettingsBtn" type="button">Connections</button>
+                  <button id="quickSkillsBtn" type="button">Skill Builder</button>
+                </div>
+                <form id="commandForm" class="command-line">
+                  <kbd>cmd+k</kbd>
+                  <input id="commandInput" placeholder="Try: new run | execute run | open settings channels | open settings models" />
+                  <button type="submit">Run</button>
+                </form>
+              </div>
+
+              <div id="onboardingChecklist" class="onboard"></div>
+
+              <div class="kpis" id="kpiGrid"></div>
+
+              <section class="chat">
+                <div class="thread" id="thread"></div>
+                <form id="chatForm" class="composer">
+                  <textarea id="chatInput" placeholder="Ask for forecast, anomaly scan, or suggest actions from current run context"></textarea>
+                  <button type="submit" class="primary">Send</button>
+                </form>
+              </section>
+
+              <div class="card stepper">
+                <h3>Guided Analysis Run</h3>
+                <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
+                <div class="step">2. Model Profile: <select id="runModelSelect"></select></div>
+                <div class="step">3. Report Type: <select id="runReportSelect"></select></div>
+                <div class="step">4. Skill (optional): <select id="runSkillSelect"></select></div>
+                <div class="step">5. Channels: <input id="runChannelsInput" value="email,slack" /></div>
+                <div class="toolbar">
+                  <button id="createRunBtn" type="button" class="primary">Create Draft Run</button>
+                  <button id="executeRunBtn" type="button">Execute Current Run</button>
+                  <button id="deliverRunBtn" type="button">Deliver Output</button>
+                  <button id="previewRunBtn" type="button">Preview Output</button>
+                </div>
+                <div class="preview-grid">
+                  <div class="preview-panel">
+                    <h4>Report Preview</h4>
+                    <pre id="runReportPreview" class="mono">Select a report type, then click Preview Output.</pre>
+                  </div>
+                  <div class="preview-panel">
+                    <h4>Channel Preview</h4>
+                    <pre id="runChannelPreview" class="mono">Delivery summary appears here before execute/deliver.</pre>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="right-rail panel">
+              <div class="card">
+                <h4>Run Health</h4>
+                <div class="badges" id="runHealthBadges"></div>
+              </div>
+              <div class="tabs">
+                <button class="tab active" data-context-tab="summary">Summary</button>
+                <button class="tab" data-context-tab="evidence">Evidence</button>
+                <button class="tab" data-context-tab="actions">Actions</button>
+                <button class="tab" data-context-tab="artifacts">Artifacts</button>
+              </div>
+              <div class="context-body" id="contextBody"></div>
+            </aside>
+          </div>
         </section>
 
-        <div class="toolbar">
-          <button id="generateReport">Generate report now</button>
-          <button id="refreshAudit">Refresh audit</button>
-        </div>
-      </section>
+        <section id="route-settings" class="route">
+          <div class="settings-layout panel">
+            <aside class="settings-nav">
+              <button class="tab active" data-settings-tab="general">General</button>
+              <button class="tab" data-settings-tab="connections">Connections</button>
+              <button class="tab" data-settings-tab="credentials">Credentials</button>
+              <button class="tab" data-settings-tab="models">Models</button>
+              <button class="tab" data-settings-tab="training">Training</button>
+              <button class="tab" data-settings-tab="reports">Reports</button>
+              <button class="tab" data-settings-tab="skills">Skills</button>
+              <button class="tab" data-settings-tab="channels">Channels</button>
+              <button class="tab" data-settings-tab="policies">Policies</button>
+            </aside>
 
-      <section class="panel">
-        <h3>Actions + Audit</h3>
-        <p class="subtle">Pending actions, latest insight, and compliance trail</p>
+            <section class="settings-content">
+              <div id="settings-general" class="settings-section active card"></div>
+              <div id="settings-connections" class="settings-section card"></div>
+              <div id="settings-credentials" class="settings-section card"></div>
+              <div id="settings-models" class="settings-section card"></div>
+              <div id="settings-training" class="settings-section card"></div>
+              <div id="settings-reports" class="settings-section card"></div>
+              <div id="settings-skills" class="settings-section card"></div>
+              <div id="settings-channels" class="settings-section card"></div>
+              <div id="settings-policies" class="settings-section card"></div>
+            </section>
+          </div>
+        </section>
 
-        <div>
-          <span class="tag">Source connections</span>
-          <div class="side-list" id="sources"></div>
-        </div>
-
-        <div>
-          <span class="tag">Installed skills</span>
-          <div class="side-list" id="skills"></div>
-        </div>
-
-        <div>
-          <span class="tag">Pending actions</span>
-          <div class="side-list" id="actions"></div>
-        </div>
-
-        <div>
-          <span class="tag">Latest insight</span>
-          <div class="side-list" id="insight"></div>
-        </div>
-
-        <div>
-          <span class="tag">Audit events</span>
-          <div class="side-list" id="audit"></div>
-        </div>
-      </section>
-    </main>
+        <section id="route-runs" class="route">
+          <div class="runs-layout panel">
+            <aside class="runs-list card">
+              <h3>Analysis Runs</h3>
+              <div id="runList" class="list"></div>
+            </aside>
+            <section class="runs-detail card" id="runDetail"></section>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <script>
       const demoTenantId = "__DEMO_TENANT_ID__";
-      let tenantId = demoTenantId;
+      const appState = {
+        tenantId: demoTenantId,
+        route: "workspace",
+        settingsTab: "general",
+        contextTab: "summary",
+        activeRunId: null,
+        settings: null,
+        connections: [],
+        profiles: [],
+        reportTypes: [],
+        skillsInstalled: [],
+        skillDrafts: [],
+        runs: [],
+        channelEvents: [],
+        sourceRunHistoryByConnection: {},
+        insightById: {},
+        reportById: {},
+        latestInsight: null,
+        pendingActions: [],
+        metrics: {},
+        runPreview: {
+          reportText: "Select a report type, then click Preview Output.",
+          channelText: "Delivery summary appears here before execute/deliver."
+        }
+      };
 
-      const headers = () => ({
-        "content-type": "application/json",
-        "x-tenant-id": tenantId,
-        "x-user-id": "ui-user",
-        "x-user-role": "owner"
-      });
+      const savedPrompts = [
+        "Forecast next 14 days and explain confidence.",
+        "Find anomalies in lead and pipeline movement.",
+        "Generate executive summary for this week.",
+        "Propose actions with policy constraints."
+      ];
 
-      const thread = document.getElementById("thread");
+      function headers() {
+        return {
+          "content-type": "application/json",
+          "x-tenant-id": appState.tenantId,
+          "x-user-id": "ui-user",
+          "x-user-role": "owner"
+        };
+      }
 
-      function appendMessage(text, kind = "ai") {
+      async function api(path, options = {}) {
+        const res = await fetch(path, {
+          ...options,
+          headers: {
+            ...headers(),
+            ...(options.headers || {})
+          }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(data.error || `Request failed: ${res.status}`);
+          err.payload = data;
+          throw err;
+        }
+        return data;
+      }
+
+      function setRoute(route) {
+        appState.route = route;
+        document.querySelectorAll("[data-route-target]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.routeTarget === route);
+        });
+        document.querySelectorAll(".route").forEach((routeEl) => {
+          routeEl.classList.toggle("active", routeEl.id === `route-${route}`);
+        });
+      }
+
+      function appendMessage(text, role = "ai") {
+        const thread = document.getElementById("thread");
         const div = document.createElement("div");
-        div.className = `msg ${kind}`;
+        div.className = `msg ${role}`;
         div.textContent = text;
         thread.appendChild(div);
         thread.scrollTop = thread.scrollHeight;
       }
 
+      function formatStatus(status) {
+        return `<span class="status mono">${status}</span>`;
+      }
+
+      function sourceHealthForConnection(connectionId) {
+        const connection = appState.connections.find((item) => item.id === connectionId) || null;
+        const freshnessSlaHours = Number(connection?.syncPolicy?.freshnessSlaHours ?? 24);
+        const minQualityScore = Number(connection?.qualityPolicy?.minQualityScore ?? 0.75);
+        const runs = appState.sourceRunHistoryByConnection[connectionId] || [];
+        if (!runs.length) {
+          return {
+            freshnessLabel: "No sync run",
+            freshnessClass: "warn",
+            qualityLabel: `Quality n/a (<${minQualityScore.toFixed(2)})`,
+            qualityClass: "warn"
+          };
+        }
+        const latest = runs[0];
+        const score = Number(latest.diagnostics?.qualityScore ?? 0);
+        const ageMs = Date.now() - new Date(latest.createdAt).getTime();
+        const ageHours = Math.max(0, Math.round(ageMs / (1000 * 60 * 60)));
+        const freshnessClass = ageHours <= freshnessSlaHours ? "good" : ageHours <= freshnessSlaHours * 2 ? "warn" : "bad";
+        const qualityClass = score >= minQualityScore ? "good" : score >= Math.max(0, minQualityScore - 0.1) ? "warn" : "bad";
+        return {
+          freshnessLabel: `Freshness ${ageHours}h (SLA ${freshnessSlaHours}h)`,
+          freshnessClass,
+          qualityLabel: `Quality ${score.toFixed(2)} (min ${minQualityScore.toFixed(2)})`,
+          qualityClass
+        };
+      }
+
+      function selectedModelProfile() {
+        return appState.profiles.find((item) => item.id === document.getElementById("runModelSelect")?.value)
+          || appState.profiles.find((item) => item.active)
+          || null;
+      }
+
+      function renderSavedPrompts() {
+        const box = document.getElementById("savedPromptList");
+        box.innerHTML = "";
+        savedPrompts.forEach((prompt) => {
+          const btn = document.createElement("button");
+          btn.className = "item clickable";
+          btn.textContent = prompt;
+          btn.onclick = () => {
+            document.getElementById("chatInput").value = prompt;
+          };
+          box.appendChild(btn);
+        });
+      }
+
+      function renderThreadList() {
+        const box = document.getElementById("threadList");
+        box.innerHTML = "";
+        const items = [
+          "Current analysis context",
+          "Report planning notes",
+          "Data quality checks"
+        ];
+        items.forEach((item) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.textContent = item;
+          box.appendChild(el);
+        });
+      }
+
+      function renderOnboarding() {
+        const checklist = appState.settings?.checklist || {};
+        const done = Object.values(checklist).filter(Boolean).length;
+        const total = Object.keys(checklist).length || 4;
+        const nextStep = !checklist.connectionsConfigured
+          ? "Open Settings > Connections to link your first source."
+          : !checklist.modelProfileConfigured
+            ? "Open Settings > Models to activate a model profile."
+            : !checklist.reportTypeConfigured
+              ? "Open Settings > Reports to create a report type."
+              : !checklist.channelsConfigured
+                ? "Open Settings > Channels to configure delivery."
+                : "Checklist complete. Create and execute your first guided run.";
+        document.getElementById("onboardingChecklist").innerHTML = `
+          <strong>Onboarding Checklist</strong> (${done}/${total})<br/>
+          Connections: ${checklist.connectionsConfigured ? "Done" : "Pending"} | 
+          Model Profile: ${checklist.modelProfileConfigured ? "Done" : "Pending"} | 
+          Report Type: ${checklist.reportTypeConfigured ? "Done" : "Pending"} | 
+          Channels: ${checklist.channelsConfigured ? "Done" : "Pending"}<br/>
+          <span class="subtle">${nextStep}</span>
+        `;
+      }
+
+      function renderRunContextList() {
+        const box = document.getElementById("runContextList");
+        box.innerHTML = "";
+        if (!appState.runs.length) {
+          box.innerHTML = `<div class="item">No analysis runs yet</div>`;
+          return;
+        }
+        appState.runs.slice().reverse().forEach((run) => {
+          const health = sourceHealthForConnection(run.sourceConnectionId);
+          const btn = document.createElement("button");
+          btn.className = `item clickable ${run.id === appState.activeRunId ? "active" : ""}`;
+          btn.innerHTML = `
+            <div class="mono">${run.id.slice(0, 18)}...</div>
+            <div>${formatStatus(run.status)}</div>
+            <div class="badges" style="margin-top:6px">
+              <span class="badge ${health.freshnessClass}">${health.freshnessLabel}</span>
+              <span class="badge ${health.qualityClass}">${health.qualityLabel}</span>
+            </div>
+          `;
+          btn.onclick = async () => {
+            appState.activeRunId = run.id;
+            await refreshRunArtifacts();
+            renderRunContextList();
+            renderContextPanel();
+            renderRunDetail();
+          };
+          box.appendChild(btn);
+        });
+      }
+
+      function renderKPIs() {
+        const grid = document.getElementById("kpiGrid");
+        grid.innerHTML = "";
+        ["revenue", "profit", "spend"].forEach((metric) => {
+          const value = appState.metrics[metric] || 0;
+          const el = document.createElement("div");
+          el.className = "kpi";
+          el.innerHTML = `<div class="subtle mono">${metric}</div><div class="val">${Math.round(value)}</div>`;
+          grid.appendChild(el);
+        });
+      }
+
+      function currentRun() {
+        return appState.runs.find((item) => item.id === appState.activeRunId) || null;
+      }
+
+      function renderRunHealthBadges() {
+        const box = document.getElementById("runHealthBadges");
+        const run = currentRun();
+        if (!run) {
+          box.innerHTML = `<span class="badge warn">No active run</span>`;
+          return;
+        }
+        const health = sourceHealthForConnection(run.sourceConnectionId);
+        const insight = run.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : null;
+        const confidence = insight?.confidence;
+        const confidenceClass = typeof confidence === "number"
+          ? (confidence >= 0.8 ? "good" : confidence >= 0.65 ? "warn" : "bad")
+          : "warn";
+        box.innerHTML = `
+          <span class="badge ${run.status === "completed" ? "good" : run.status === "failed" ? "bad" : "warn"}">Run ${run.status}</span>
+          <span class="badge ${health.freshnessClass}">${health.freshnessLabel}</span>
+          <span class="badge ${health.qualityClass}">${health.qualityLabel}</span>
+          <span class="badge ${confidenceClass}">Confidence ${typeof confidence === "number" ? confidence.toFixed(2) : "n/a"}</span>
+        `;
+      }
+
+      function renderContextPanel() {
+        const body = document.getElementById("contextBody");
+        const run = currentRun();
+        const tab = appState.contextTab;
+        renderRunHealthBadges();
+
+        if (tab === "summary") {
+          const selectedInsight = run?.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : null;
+          body.innerHTML = `
+            <h4>Current Context</h4>
+            <div class="subtle">${run ? `Run ${run.id}` : "No run selected"}</div>
+            <div class="item" style="margin-top:8px">${selectedInsight?.summary || appState.latestInsight?.summary || "No insight yet"}</div>
+          `;
+        }
+
+        if (tab === "evidence") {
+          const selectedInsight = run?.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : null;
+          const report = run?.artifacts?.reportId ? appState.reportById[run.artifacts.reportId] : null;
+          const latestSourceRun = run?.sourceConnectionId ? (appState.sourceRunHistoryByConnection[run.sourceConnectionId] || [])[0] : null;
+          body.innerHTML = `
+            <h4>Evidence</h4>
+            <div class="evidence-list">
+              <div class="item">Insight ID: ${run?.artifacts?.insightId || "n/a"}</div>
+              <div class="item">Confidence: ${selectedInsight?.confidence ?? "n/a"}</div>
+              <div class="item">Model Quality Warnings: ${(selectedInsight?.qualityWarnings || []).join(", ") || "none"}</div>
+              <div class="item">Forecast Points: ${selectedInsight?.forecast?.points?.length ?? 0}</div>
+              <div class="item">Source Run: ${latestSourceRun?.id || "n/a"}</div>
+              <div class="item">Source Diagnostics: quality=${latestSourceRun?.diagnostics?.qualityScore ?? "n/a"}, retries=${latestSourceRun?.diagnostics?.retries ?? "n/a"}, records=${latestSourceRun?.diagnostics?.insertedRecords ?? "n/a"}, qualityPassed=${latestSourceRun?.diagnostics?.qualityPassed ?? "n/a"}</div>
+              <div class="item">Quality Checks: ${(latestSourceRun?.diagnostics?.qualityChecks || []).map((c) => `${c.check}:${c.status}`).join(", ") || "n/a"}</div>
+              <div class="item">Report ID: ${run?.artifacts?.reportId || "n/a"}</div>
+              <div class="item">Report Summary: ${report?.summary || "n/a"}</div>
+            </div>
+          `;
+        }
+
+        if (tab === "actions") {
+          const actions = appState.pendingActions || [];
+          body.innerHTML = `<h4>Actions</h4>${actions.length ? actions.map((a) => `<div class="item">${a.actionType} (${a.policyDecision})</div>`).join("") : `<div class="item">No pending actions</div>`}`;
+        }
+
+        if (tab === "artifacts") {
+          body.innerHTML = run
+            ? `<h4>Artifacts</h4><div class="item">Insight: ${run.artifacts?.insightId || "none"}</div><div class="item">Report: ${run.artifacts?.reportId || "none"}</div><div class="item">Channels: ${(run.artifacts?.channelEventIds || []).length}</div>`
+            : `<h4>Artifacts</h4><div class="item">No run selected</div>`;
+        }
+      }
+
+      function fillSelect(selectId, options, valueKey, labelKey, includeEmpty = false, emptyLabel = "Select...", preferredValue = null) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const previous = select.value;
+        select.innerHTML = "";
+        if (includeEmpty) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = emptyLabel;
+          select.appendChild(opt);
+        }
+        options.forEach((item) => {
+          const opt = document.createElement("option");
+          opt.value = item[valueKey];
+          opt.textContent = item[labelKey];
+          select.appendChild(opt);
+        });
+        const candidate = preferredValue ?? previous;
+        if (candidate != null) {
+          select.value = String(candidate);
+        }
+      }
+
+      function renderRunBuilder() {
+        const run = currentRun();
+        fillSelect("runSourceSelect", appState.connections, "id", "sourceType", true, "Select...", run?.sourceConnectionId ?? null);
+        fillSelect("runModelSelect", appState.profiles, "id", "name", true, "Select...", run?.modelProfileId ?? null);
+        fillSelect("runReportSelect", appState.reportTypes, "id", "name", true, "Select...", run?.reportTypeId ?? null);
+
+        const skillOptions = [{ id: "", name: "No skill" }, ...appState.skillsInstalled.map((s) => ({ id: s.id, name: s.id }))];
+        fillSelect("runSkillSelect", skillOptions, "id", "name", false, "Select...", run?.skillId ?? "");
+        if (run?.channels?.length) {
+          document.getElementById("runChannelsInput").value = run.channels.join(",");
+        }
+      }
+
+      function renderRunPreviews() {
+        document.getElementById("runReportPreview").textContent = appState.runPreview.reportText;
+        document.getElementById("runChannelPreview").textContent = appState.runPreview.channelText;
+      }
+
+      async function previewCurrentRunOutput() {
+        const reportTypeId = document.getElementById("runReportSelect").value;
+        const channels = document.getElementById("runChannelsInput").value.split(",").map((s) => s.trim()).filter(Boolean);
+        if (!reportTypeId) {
+          appState.runPreview.reportText = "Select a report type to preview.";
+          appState.runPreview.channelText = "Select channels to preview delivery.";
+          renderRunPreviews();
+          return;
+        }
+
+        const preview = await api(`/v1/reports/types/${encodeURIComponent(reportTypeId)}/preview`, {
+          method: "POST"
+        });
+        appState.runPreview.reportText = preview.preview;
+
+        const run = currentRun();
+        const insight = run?.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : appState.latestInsight;
+        const confidence = insight?.confidence != null ? Number(insight.confidence).toFixed(2) : "n/a";
+        const summary = insight?.summary || "No insight summary yet. Execute run to generate narrative.";
+        const reportType = appState.reportTypes.find((item) => item.id === reportTypeId) || null;
+        const reportName = reportType?.name || "Selected report";
+        const deliveryPreview = await api(`/v1/reports/types/${encodeURIComponent(reportTypeId)}/delivery-preview`, {
+          method: "POST",
+          body: JSON.stringify({
+            channels,
+            reportTitle: reportName,
+            reportSummary: summary,
+            context: {
+              runId: run?.id || "draft",
+              insightId: insight?.id || "n/a",
+              confidence,
+              actionsCount: insight?.recommendedActions?.length ?? 0
+            }
+          })
+        });
+        const channelLines = (deliveryPreview.previews || []).map((previewItem) => {
+          const readiness = previewItem.ready ? "ready" : `not_ready(${previewItem.reason || "unknown"})`;
+          return `- ${previewItem.channel} [${readiness}]: ${previewItem.message}`;
+        });
+
+        appState.runPreview.channelText = [
+          `Delivery Channels: ${channels.join(", ") || "none selected"}`,
+          `Report: ${reportName}`,
+          `Confidence: ${confidence}`,
+          "",
+          ...channelLines
+        ].join("\n");
+        renderRunPreviews();
+      }
+
+      function renderRunList() {
+        const box = document.getElementById("runList");
+        box.innerHTML = "";
+        if (!appState.runs.length) {
+          box.innerHTML = `<div class="item">No runs created</div>`;
+          return;
+        }
+        appState.runs.slice().reverse().forEach((run) => {
+          const health = sourceHealthForConnection(run.sourceConnectionId);
+          const btn = document.createElement("button");
+          btn.className = "item clickable";
+          btn.innerHTML = `
+            <div class="mono">${run.id}</div>
+            <div>${formatStatus(run.status)}</div>
+            <div class="badges" style="margin-top:6px">
+              <span class="badge ${health.freshnessClass}">${health.freshnessLabel}</span>
+              <span class="badge ${health.qualityClass}">${health.qualityLabel}</span>
+            </div>
+          `;
+          btn.onclick = async () => {
+            appState.activeRunId = run.id;
+            await refreshRunArtifacts();
+            renderRunDetail();
+            renderRunContextList();
+            renderContextPanel();
+          };
+          box.appendChild(btn);
+        });
+      }
+
+      function renderRunDetail() {
+        const box = document.getElementById("runDetail");
+        const run = currentRun();
+        if (!run) {
+          box.innerHTML = `<h3>Run Detail</h3><div class="item">Select a run to view timeline and artifacts.</div>`;
+          return;
+        }
+        const health = sourceHealthForConnection(run.sourceConnectionId);
+        const stepRows = (run.steps || []).map((step) => `
+          <div class="item">
+            <div><strong>${step.name}</strong> ${formatStatus(step.status)}</div>
+            <div class="subtle">${step.detail || ""}</div>
+          </div>
+        `).join("");
+        const deliveryEvents = (run.artifacts?.channelEventIds || [])
+          .map((eventId) => appState.channelEvents.find((event) => event.id === eventId))
+          .filter(Boolean);
+        const deliveryRows = deliveryEvents.length
+          ? deliveryEvents.map((event) => `
+              <div class="item">
+                <div><strong>${event.channel}</strong> ${formatStatus(event.status || "unknown")}</div>
+                <div class="subtle">attempt ${event.attemptCount || 1}/${event.maxAttempts || 3} | http ${event.responseMetadata?.httpStatus ?? "n/a"}</div>
+                <div class="subtle">${event.lastError || "ok"}</div>
+                <div class="mono" style="font-size:11px; white-space:pre-wrap">${event.payload?.message || ""}</div>
+                ${(event.status === "failed" || event.status === "failed_permanent") ? `<div class="toolbar" style="margin-top:6px"><button data-retry-channel-event="${event.id}">Retry</button></div>` : ""}
+              </div>
+            `).join("")
+          : `<div class="item">No delivery events yet</div>`;
+
+        box.innerHTML = `
+          <h3>${run.id}</h3>
+          <div>${formatStatus(run.status)}</div>
+          <div class="badges">
+            <span class="badge ${health.freshnessClass}">${health.freshnessLabel}</span>
+            <span class="badge ${health.qualityClass}">${health.qualityLabel}</span>
+          </div>
+          <div class="item">Source: ${run.sourceConnectionId || "n/a"}</div>
+          <div class="item">Model Profile: ${run.modelProfileId || "n/a"}</div>
+          <div class="item">Report Type: ${run.reportTypeId || "n/a"}</div>
+          <h4>Steps</h4>
+          ${stepRows || `<div class="item">No step data</div>`}
+          <h4>Deliveries</h4>
+          ${deliveryRows}
+          <h4>Timeline</h4>
+          <div class="timeline">${(run.timeline || []).map((t) => `<div class="item"><div class="mono">${new Date(t.at).toLocaleTimeString()}</div><div>${t.event}</div><div class="subtle">${t.detail || ""}</div></div>`).join("")}</div>
+        `;
+
+        box.querySelectorAll("[data-retry-channel-event]").forEach((btn) => {
+          btn.onclick = async () => {
+            await retryDeliveryEvent(btn.dataset.retryChannelEvent);
+          };
+        });
+      }
+
+      function renderSettingsGeneral() {
+        const settings = appState.settings || {};
+        const box = document.getElementById("settings-general");
+        box.innerHTML = `
+          <h3>General</h3>
+          <div class="form-grid">
+            <label>Name<input id="generalName" value="${settings.general?.name || ""}" /></label>
+            <label>Timezone<input id="generalTimezone" value="${settings.general?.timezone || "America/New_York"}" /></label>
+            <label>Locale<input id="generalLocale" value="${settings.general?.locale || "en-US"}" /></label>
+            <label>Brand Primary<input id="generalPrimary" value="${settings.general?.branding?.primary || "#0c8f6b"}" /></label>
+            <button id="saveGeneral" class="primary">Save General</button>
+          </div>
+        `;
+        document.getElementById("saveGeneral").onclick = async () => {
+          await api("/v1/settings/general", {
+            method: "PATCH",
+            body: JSON.stringify({
+              name: document.getElementById("generalName").value,
+              timezone: document.getElementById("generalTimezone").value,
+              locale: document.getElementById("generalLocale").value,
+              branding: { primary: document.getElementById("generalPrimary").value }
+            })
+          });
+          await loadAll();
+          appendMessage("General settings updated.");
+        };
+      }
+
+      function renderSettingsConnections() {
+        const box = document.getElementById("settings-connections");
+        box.innerHTML = `
+          <h3>Connections</h3>
+          <div class="form-grid">
+            <label>Source Type
+              <select id="connectionType"></select>
+            </label>
+            <label>Mode
+              <select id="connectionMode">
+                <option value="hybrid">hybrid</option>
+                <option value="ingest">ingest</option>
+                <option value="live">live</option>
+              </select>
+            </label>
+            <label>Owner<input id="connectionOwner" value="data-team" /></label>
+            <label>Freshness SLA (hours)<input id="connectionSlaHours" value="24" type="number" min="1" /></label>
+            <label>Min Quality Score<input id="connectionMinQuality" value="0.75" type="number" min="0" max="1" step="0.01" /></label>
+            <label>Block Run On Low Quality
+              <select id="connectionBlockLowQuality">
+                <option value="false" selected>false</option>
+                <option value="true">true</option>
+              </select>
+            </label>
+            <label class="full">Quality Checks (comma separated)<input id="connectionQualityChecks" value="null_check,duplicate_guard,spike_check" /></label>
+            <label class="full">Credential Token<input id="connectionToken" placeholder="token or key ref" /></label>
+            <button id="addConnection" class="primary">Add Connection</button>
+          </div>
+          <div class="list" id="connectionsList"></div>
+        `;
+
+        api("/v1/sources/catalog").then((data) => {
+          fillSelect("connectionType", data.sources, "sourceType", "sourceType");
+        }).catch(() => {});
+
+        document.getElementById("addConnection").onclick = async () => {
+          await api("/v1/sources/connections", {
+            method: "POST",
+            body: JSON.stringify({
+              sourceType: document.getElementById("connectionType").value,
+              mode: document.getElementById("connectionMode").value,
+              auth: { token: document.getElementById("connectionToken").value },
+              syncPolicy: {
+                intervalMinutes: 60,
+                backfillDays: 30,
+                freshnessSlaHours: Number(document.getElementById("connectionSlaHours").value)
+              },
+              qualityPolicy: {
+                minQualityScore: Number(document.getElementById("connectionMinQuality").value),
+                blockModelRun: document.getElementById("connectionBlockLowQuality").value === "true"
+              },
+              metadata: {
+                owner: document.getElementById("connectionOwner").value,
+                qualityChecks: document.getElementById("connectionQualityChecks").value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              }
+            })
+          });
+          await loadAll();
+          appendMessage("Connection created.");
+        };
+
+        const list = document.getElementById("connectionsList");
+        if (!appState.connections.length) {
+          list.innerHTML = `<div class="item">No connections configured</div>`;
+        } else {
+          list.innerHTML = appState.connections.map((c) => `
+            <div class="item" data-connection-id="${c.id}">
+              <div><strong>${c.sourceType}</strong> (${c.mode}) ${formatStatus(c.status)}</div>
+              <div class="subtle">Owner: ${c.metadata?.owner || "unassigned"} | SLA: ${c.syncPolicy?.freshnessSlaHours ?? 24}h | Min Quality: ${c.qualityPolicy?.minQualityScore ?? 0.75}</div>
+              <div class="subtle">Checks: ${(c.metadata?.qualityChecks || []).join(", ") || "none"}</div>
+              <div class="form-grid" style="margin-top:8px">
+                <label>Owner<input data-conn-owner value="${c.metadata?.owner || ""}" /></label>
+                <label>Freshness SLA (hours)<input data-conn-sla value="${c.syncPolicy?.freshnessSlaHours ?? 24}" type="number" min="1" /></label>
+                <label>Min Quality Score<input data-conn-quality value="${c.qualityPolicy?.minQualityScore ?? 0.75}" type="number" min="0" max="1" step="0.01" /></label>
+                <label>Block Run On Low Quality
+                  <select data-conn-block>
+                    <option value="false" ${!c.qualityPolicy?.blockModelRun ? "selected" : ""}>false</option>
+                    <option value="true" ${c.qualityPolicy?.blockModelRun ? "selected" : ""}>true</option>
+                  </select>
+                </label>
+                <label class="full">Quality Checks<input data-conn-checks value="${(c.metadata?.qualityChecks || []).join(",")}" /></label>
+              </div>
+              <div class="toolbar" style="margin-top:6px">
+                <button data-test-connection="${c.id}">Test</button>
+                <button data-sync-connection="${c.id}">Sync</button>
+                <button data-save-connection="${c.id}">Save Config</button>
+              </div>
+            </div>
+          `).join("");
+        }
+
+        list.querySelectorAll("[data-test-connection]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/sources/connections/${encodeURIComponent(btn.dataset.testConnection)}/test`, { method: "POST" });
+            await loadAll();
+            appendMessage("Connection test complete.");
+          };
+        });
+
+        list.querySelectorAll("[data-sync-connection]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/sources/connections/${encodeURIComponent(btn.dataset.syncConnection)}/sync`, {
+              method: "POST",
+              body: JSON.stringify({ periodDays: 30 })
+            });
+            await loadAll();
+            appendMessage("Connection sync complete.");
+          };
+        });
+
+        list.querySelectorAll("[data-save-connection]").forEach((btn) => {
+          btn.onclick = async () => {
+            const container = btn.closest("[data-connection-id]");
+            if (!container) return;
+            const owner = container.querySelector("[data-conn-owner]")?.value ?? "unassigned";
+            const freshnessSlaHours = Number(container.querySelector("[data-conn-sla]")?.value ?? 24);
+            const minQualityScore = Number(container.querySelector("[data-conn-quality]")?.value ?? 0.75);
+            const blockModelRun = (container.querySelector("[data-conn-block]")?.value ?? "false") === "true";
+            const qualityChecks = (container.querySelector("[data-conn-checks]")?.value ?? "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            await api(`/v1/sources/connections/${encodeURIComponent(btn.dataset.saveConnection)}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                metadata: { owner, qualityChecks },
+                syncPolicy: { freshnessSlaHours },
+                qualityPolicy: { minQualityScore, blockModelRun }
+              })
+            });
+            await loadAll();
+            appendMessage("Connection config updated.");
+          };
+        });
+      }
+
+      function renderSettingsCredentials() {
+        const prefs = appState.settings?.modelPreferences || {};
+        const box = document.getElementById("settings-credentials");
+        box.innerHTML = `
+          <h3>Credentials</h3>
+          <div class="form-grid">
+            <label>LLM Mode
+              <select id="credMode">
+                <option value="managed" ${prefs.llmMode === "managed" ? "selected" : ""}>managed</option>
+                <option value="byo" ${prefs.llmMode === "byo" ? "selected" : ""}>byo</option>
+              </select>
+            </label>
+            <label>Default Provider<input id="credProvider" value="${prefs.defaultProvider || "managed"}" /></label>
+            <label class="full">BYO Key Refs (comma separated)<input id="credRefs" value="${(prefs.byoKeyRefs || []).join(",")}" /></label>
+            <button id="saveCredentials" class="primary">Save Credentials</button>
+          </div>
+        `;
+        document.getElementById("saveCredentials").onclick = async () => {
+          await api("/v1/settings/model-preferences", {
+            method: "PATCH",
+            body: JSON.stringify({
+              llmMode: document.getElementById("credMode").value,
+              defaultProvider: document.getElementById("credProvider").value,
+              byoKeyRefs: document.getElementById("credRefs").value.split(",").map((s) => s.trim()).filter(Boolean)
+            })
+          });
+          await loadAll();
+          appendMessage("Credential preferences saved.");
+        };
+      }
+
+      function renderSettingsModels() {
+        const box = document.getElementById("settings-models");
+        box.innerHTML = `
+          <h3>Models</h3>
+          <div class="form-grid">
+            <label>Name<input id="profileName" value="Custom Forecast" /></label>
+            <label>Objective
+              <select id="profileObjective">
+                <option value="forecast">forecast</option>
+                <option value="anomaly">anomaly</option>
+                <option value="segmentation">segmentation</option>
+                <option value="attribution">attribution</option>
+              </select>
+            </label>
+            <label>Target Metric<input id="profileMetric" value="revenue" /></label>
+            <label>Horizon Days<input id="profileHorizon" value="14" type="number" /></label>
+            <button id="createProfile" class="primary">Create Model Profile</button>
+          </div>
+          <div class="list" id="profilesList"></div>
+        `;
+
+        document.getElementById("createProfile").onclick = async () => {
+          await api("/v1/models/profiles", {
+            method: "POST",
+            body: JSON.stringify({
+              name: document.getElementById("profileName").value,
+              objective: document.getElementById("profileObjective").value,
+              targetMetricId: document.getElementById("profileMetric").value,
+              horizonDays: Number(document.getElementById("profileHorizon").value),
+              provider: "managed"
+            })
+          });
+          await loadAll();
+          appendMessage("Model profile created.");
+        };
+
+        const list = document.getElementById("profilesList");
+        list.innerHTML = appState.profiles.map((p) => `
+          <div class="item">
+            <strong>${p.name}</strong> ${p.active ? "<span class='status'>active</span>" : ""}
+            <div class="subtle">${p.objective} / ${p.targetMetricId} / ${p.horizonDays}d</div>
+            <div class="toolbar" style="margin-top:6px"><button data-activate-profile="${p.id}">Activate</button></div>
+          </div>
+        `).join("");
+
+        list.querySelectorAll("[data-activate-profile]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/models/profiles/${encodeURIComponent(btn.dataset.activateProfile)}/activate`, { method: "POST" });
+            await loadAll();
+            appendMessage("Model profile activated.");
+          };
+        });
+      }
+
+      function renderSettingsTraining() {
+        const training = appState.settings?.training || {};
+        const box = document.getElementById("settings-training");
+        box.innerHTML = `
+          <h3>Training</h3>
+          <div class="form-grid">
+            <label>Opt-in
+              <select id="trainingOptIn">
+                <option value="true" ${training.optIn ? "selected" : ""}>true</option>
+                <option value="false" ${!training.optIn ? "selected" : ""}>false</option>
+              </select>
+            </label>
+            <label>Allow Tenant Fine-Tuning
+              <select id="trainingFineTune">
+                <option value="true" ${training.allowTenantFineTuning ? "selected" : ""}>true</option>
+                <option value="false" ${!training.allowTenantFineTuning ? "selected" : ""}>false</option>
+              </select>
+            </label>
+            <label>Schedule (hours)<input id="trainingInterval" value="${training.schedule?.intervalHours || 24}" type="number" /></label>
+            <button id="saveTraining" class="primary">Save Training</button>
+          </div>
+        `;
+
+        document.getElementById("saveTraining").onclick = async () => {
+          await api("/v1/settings/training", {
+            method: "PATCH",
+            body: JSON.stringify({
+              optIn: document.getElementById("trainingOptIn").value === "true",
+              allowTenantFineTuning: document.getElementById("trainingFineTune").value === "true",
+              schedule: { intervalHours: Number(document.getElementById("trainingInterval").value) }
+            })
+          });
+          await loadAll();
+          appendMessage("Training settings saved.");
+        };
+      }
+
+      function renderSettingsReports() {
+        const box = document.getElementById("settings-reports");
+        box.innerHTML = `
+          <h3>Report Types</h3>
+          <div class="toolbar">
+            <button id="installFounderReportType" type="button">Add Founder Mode Template</button>
+          </div>
+          <div class="form-grid">
+            <label>Name<input id="reportTypeName" value="Client Digest" /></label>
+            <label>Format
+              <select id="reportTypeFormat">
+                <option value="pdf">pdf</option>
+                <option value="html">html</option>
+              </select>
+            </label>
+            <label class="full">Sections (comma separated)<input id="reportTypeSections" value="kpi_snapshot,trend_chart,narrative,actions" /></label>
+            <label class="full">Channels (comma separated)<input id="reportTypeChannels" value="email,slack" /></label>
+            <label class="full">Email Template<textarea id="reportTemplateEmail">[{{channel}}] {{reportTitle}}\n{{reportSummary}}\nRun={{runId}}</textarea></label>
+            <label class="full">Slack Template<textarea id="reportTemplateSlack">[{{channel}}] {{reportTitle}} | {{reportSummary}} | confidence={{confidence}}</textarea></label>
+            <label class="full">Telegram Template<textarea id="reportTemplateTelegram">[{{channel}}] {{reportTitle}} | {{reportSummary}}</textarea></label>
+            <button id="createReportType" class="primary">Create Report Type</button>
+          </div>
+          <div class="list" id="reportTypeList"></div>
+          <div class="card" id="reportPreviewBox"><h4>Preview</h4><pre class="mono" id="reportPreview" style="white-space:pre-wrap"></pre></div>
+        `;
+
+        document.getElementById("installFounderReportType").onclick = async () => {
+          const exists = appState.reportTypes.some((item) => item.name === "Founder Growth and Cash Cockpit");
+          if (exists) {
+            appendMessage("Founder-mode template already exists.");
+            return;
+          }
+          await api("/v1/reports/types", {
+            method: "POST",
+            body: JSON.stringify({
+              name: "Founder Growth and Cash Cockpit",
+              defaultFormat: "html",
+              sections: ["kpi_snapshot", "trend_chart", "narrative", "actions", "appendix"],
+              defaultChannels: ["slack", "email"],
+              schedule: { intervalMinutes: 1440 },
+              deliveryTemplates: {
+                email: "[{{channel}}] {{reportTitle}}\n{{reportSummary}}\nRun={{runId}}",
+                slack: "[{{channel}}] {{reportTitle}} | {{reportSummary}} | confidence={{confidence}} | actions={{actionsCount}}",
+                telegram: "[{{channel}}] {{reportTitle}} | {{reportSummary}}"
+              }
+            })
+          });
+          await loadAll();
+          appendMessage("Founder-mode report template installed.");
+        };
+
+        document.getElementById("createReportType").onclick = async () => {
+          await api("/v1/reports/types", {
+            method: "POST",
+            body: JSON.stringify({
+              name: document.getElementById("reportTypeName").value,
+              defaultFormat: document.getElementById("reportTypeFormat").value,
+              sections: document.getElementById("reportTypeSections").value.split(",").map((s) => s.trim()).filter(Boolean),
+              defaultChannels: document.getElementById("reportTypeChannels").value.split(",").map((s) => s.trim()).filter(Boolean),
+              deliveryTemplates: {
+                email: document.getElementById("reportTemplateEmail").value,
+                slack: document.getElementById("reportTemplateSlack").value,
+                telegram: document.getElementById("reportTemplateTelegram").value
+              }
+            })
+          });
+          await loadAll();
+          appendMessage("Report type created.");
+        };
+
+        const list = document.getElementById("reportTypeList");
+        list.innerHTML = appState.reportTypes.map((t) => `
+          <div class="item" data-report-type-id="${t.id}">
+            <strong>${t.name}</strong>
+            <div class="subtle">${t.defaultFormat} | ${t.sections.join(" / ")}</div>
+            <div class="form-grid" style="margin-top:8px">
+              <label class="full">Email Template<textarea data-report-template-email>${t.deliveryTemplates?.email || ""}</textarea></label>
+              <label class="full">Slack Template<textarea data-report-template-slack>${t.deliveryTemplates?.slack || ""}</textarea></label>
+              <label class="full">Telegram Template<textarea data-report-template-telegram>${t.deliveryTemplates?.telegram || ""}</textarea></label>
+            </div>
+            <div class="toolbar" style="margin-top:6px">
+              <button data-preview-report-type="${t.id}">Preview</button>
+              <button data-save-report-templates="${t.id}">Save Templates</button>
+            </div>
+          </div>
+        `).join("");
+
+        list.querySelectorAll("[data-preview-report-type]").forEach((btn) => {
+          btn.onclick = async () => {
+            const response = await api(`/v1/reports/types/${encodeURIComponent(btn.dataset.previewReportType)}/preview`, { method: "POST" });
+            document.getElementById("reportPreview").textContent = response.preview;
+          };
+        });
+
+        list.querySelectorAll("[data-save-report-templates]").forEach((btn) => {
+          btn.onclick = async () => {
+            const container = btn.closest("[data-report-type-id]");
+            if (!container) return;
+            await api(`/v1/reports/types/${encodeURIComponent(btn.dataset.saveReportTemplates)}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                deliveryTemplates: {
+                  email: container.querySelector("[data-report-template-email]")?.value ?? "",
+                  slack: container.querySelector("[data-report-template-slack]")?.value ?? "",
+                  telegram: container.querySelector("[data-report-template-telegram]")?.value ?? ""
+                }
+              })
+            });
+            await loadAll();
+            appendMessage("Report templates updated.");
+          };
+        });
+      }
+
+      function renderSettingsSkills() {
+        const box = document.getElementById("settings-skills");
+        box.innerHTML = `
+          <h3>Skills</h3>
+          <div class="card">
+            <h4>Installed Skills</h4>
+            <div class="list" id="installedSkillsList"></div>
+          </div>
+          <div class="card">
+            <h4>Guided Skill Wizard</h4>
+            <div class="form-grid">
+              <label>Name<input id="skillDraftName" value="Custom Ops Skill" /></label>
+              <label>Version<input id="skillDraftVersion" value="1.0.0" /></label>
+              <label class="full">Intent (single)<input id="skillDraftIntent" value="ops_followup" /></label>
+              <label class="full">Channels (comma separated)<input id="skillDraftChannels" value="web,slack,api" /></label>
+              <label class="full">System Prompt<textarea id="skillDraftPrompt">Prioritize concise, actionable operating recommendations.</textarea></label>
+              <button id="createSkillDraftBtn" class="primary">Create Draft</button>
+            </div>
+            <div class="toolbar" style="margin-top:8px">
+              <button id="validateDraftBtn">Validate Latest Draft</button>
+              <button id="publishDraftBtn">Publish Latest Draft</button>
+            </div>
+            <div class="list" id="skillDraftList" style="margin-top:8px"></div>
+          </div>
+          <div class="card">
+            <h4>Skill Testing Sandbox</h4>
+            <div class="form-grid">
+              <label>Skill
+                <select id="skillSandboxSkill"></select>
+              </label>
+              <label>Channel
+                <select id="skillSandboxChannel">
+                  <option value="web">web</option>
+                  <option value="slack">slack</option>
+                  <option value="telegram">telegram</option>
+                  <option value="api">api</option>
+                </select>
+              </label>
+              <label class="full">Intent<input id="skillSandboxIntent" value="analysis_run" /></label>
+              <label class="full">Requested Tools (comma separated)<input id="skillSandboxTools" value="model.run" /></label>
+              <label>Estimated Tokens<input id="skillSandboxTokens" type="number" value="900" min="0" /></label>
+              <label>Timeout (ms)<input id="skillSandboxTimeout" type="number" value="2500" min="1" /></label>
+              <label>Generate Report
+                <select id="skillSandboxGenerateReport">
+                  <option value="false" selected>false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <button id="runSkillSandboxBtn" class="primary">Run Sandbox Test</button>
+            </div>
+            <pre class="mono" id="skillSandboxTrace" style="white-space:pre-wrap; margin-top:8px">Run a sandbox test to view routing, tools, and guardrail trace.</pre>
+          </div>
+        `;
+
+        const installedList = document.getElementById("installedSkillsList");
+        installedList.innerHTML = appState.skillsInstalled.length
+          ? appState.skillsInstalled.map((s) => `
+              <div class="item">
+                <div>${s.id} ${s.active ? "<span class='status'>active</span>" : ""}</div>
+                <div class="toolbar" style="margin-top:6px">
+                  <button data-activate-skill="${s.id}">Activate</button>
+                  <button data-deactivate-skill="${s.id}">Deactivate</button>
+                </div>
+              </div>
+            `).join("")
+          : `<div class="item">No installed skills</div>`;
+
+        installedList.querySelectorAll("[data-activate-skill]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/skills/${encodeURIComponent(btn.dataset.activateSkill)}/activate`, { method: "POST" });
+            await loadAll();
+            appendMessage("Skill activated.");
+          };
+        });
+
+        installedList.querySelectorAll("[data-deactivate-skill]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/skills/${encodeURIComponent(btn.dataset.deactivateSkill)}/deactivate`, { method: "POST" });
+            await loadAll();
+            appendMessage("Skill deactivated.");
+          };
+        });
+
+        document.getElementById("createSkillDraftBtn").onclick = async () => {
+          const draft = await api("/v1/skills/drafts", {
+            method: "POST",
+            body: JSON.stringify({
+              manifest: {
+                id: document.getElementById("skillDraftName").value.toLowerCase().replace(/\s+/g, "-"),
+                version: document.getElementById("skillDraftVersion").value,
+                name: document.getElementById("skillDraftName").value,
+                description: "Tenant guided skill",
+                triggers: {
+                  intents: [document.getElementById("skillDraftIntent").value],
+                  channels: document.getElementById("skillDraftChannels").value.split(",").map((s) => s.trim()).filter(Boolean)
+                },
+                tools: [{ id: "model.run", allow: true }, { id: "reports.generate", allow: true }],
+                guardrails: {
+                  confidenceMin: 0.7,
+                  humanApprovalFor: ["adjust_budget"],
+                  budgetCapUsd: 10000,
+                  tokenBudget: 2500,
+                  timeBudgetMs: 8000,
+                  killSwitch: false
+                },
+                prompts: { system: document.getElementById("skillDraftPrompt").value },
+                schedules: []
+              }
+            })
+          });
+          appState.lastDraftId = draft.draft.draftId;
+          await loadAll();
+          appendMessage("Skill draft created.");
+        };
+
+        document.getElementById("validateDraftBtn").onclick = async () => {
+          if (!appState.lastDraftId) {
+            appendMessage("Create a draft first.", "ai");
+            return;
+          }
+          await api(`/v1/skills/drafts/${encodeURIComponent(appState.lastDraftId)}/validate`, { method: "POST" });
+          await loadAll();
+          appendMessage("Draft validation complete.");
+        };
+
+        document.getElementById("publishDraftBtn").onclick = async () => {
+          if (!appState.lastDraftId) {
+            appendMessage("Create a draft first.", "ai");
+            return;
+          }
+          await api(`/v1/skills/drafts/${encodeURIComponent(appState.lastDraftId)}/publish`, {
+            method: "POST",
+            body: JSON.stringify({ active: true })
+          });
+          await loadAll();
+          appendMessage("Draft published and installed.");
+        };
+
+        const draftList = document.getElementById("skillDraftList");
+        draftList.innerHTML = appState.skillDrafts.length
+          ? appState.skillDrafts.slice().reverse().map((d) => `<div class="item"><div>${d.manifest?.name || d.draftId}</div><div>${formatStatus(d.status)}</div></div>`).join("")
+          : `<div class="item">No drafts yet</div>`;
+
+        const sandboxSelect = document.getElementById("skillSandboxSkill");
+        if (appState.skillsInstalled.length) {
+          sandboxSelect.innerHTML = appState.skillsInstalled.map((skill) => `
+            <option value="${skill.id}" ${skill.active ? "selected" : ""}>${skill.id}</option>
+          `).join("");
+        } else {
+          sandboxSelect.innerHTML = `<option value="">No installed skills</option>`;
+        }
+
+        document.getElementById("runSkillSandboxBtn").onclick = async () => {
+          const skillId = document.getElementById("skillSandboxSkill").value;
+          if (!skillId) {
+            appendMessage("Install a skill first to run sandbox tests.");
+            return;
+          }
+          const payload = {
+            skillId,
+            intent: document.getElementById("skillSandboxIntent").value,
+            channel: document.getElementById("skillSandboxChannel").value,
+            requestedTools: document.getElementById("skillSandboxTools").value.split(",").map((s) => s.trim()).filter(Boolean),
+            estimatedTokens: Number(document.getElementById("skillSandboxTokens").value),
+            timeoutMs: Number(document.getElementById("skillSandboxTimeout").value),
+            generateReport: document.getElementById("skillSandboxGenerateReport").value === "true"
+          };
+
+          try {
+            const result = await api("/v1/skills/run", {
+              method: "POST",
+              body: JSON.stringify(payload)
+            });
+            document.getElementById("skillSandboxTrace").textContent = JSON.stringify({
+              runId: result.run.id,
+              status: result.run.status,
+              confidence: result.run.confidence,
+              warning: result.run.warning ?? null,
+              trace: result.run.trace
+            }, null, 2);
+            await loadAll();
+            appendMessage("Skill sandbox test complete.");
+          } catch (error) {
+            document.getElementById("skillSandboxTrace").textContent = JSON.stringify({
+              error: error.message,
+              checks: error.payload?.checks ?? null,
+              details: error.payload?.details ?? null
+            }, null, 2);
+            appendMessage(`Skill sandbox failed: ${error.message}`);
+          }
+        };
+      }
+
+      function renderSettingsChannels() {
+        const channels = appState.settings?.channels || { slack: {}, telegram: {} };
+        const box = document.getElementById("settings-channels");
+        box.innerHTML = `
+          <h3>Channels</h3>
+          <div class="form-grid">
+            <label>Slack Enabled
+              <select id="channelSlackEnabled">
+                <option value="true" ${channels.slack?.enabled ? "selected" : ""}>true</option>
+                <option value="false" ${!channels.slack?.enabled ? "selected" : ""}>false</option>
+              </select>
+            </label>
+            <label>Slack Webhook Ref<input id="channelSlackRef" value="${channels.slack?.webhookRef || ""}" /></label>
+            <label>Telegram Enabled
+              <select id="channelTelegramEnabled">
+                <option value="true" ${channels.telegram?.enabled ? "selected" : ""}>true</option>
+                <option value="false" ${!channels.telegram?.enabled ? "selected" : ""}>false</option>
+              </select>
+            </label>
+            <label>Telegram Bot Token Ref<input id="channelTelegramRef" value="${channels.telegram?.botTokenRef || ""}" /></label>
+            <label class="full">Telegram Chat ID<input id="channelTelegramChat" value="${channels.telegram?.chatId || ""}" /></label>
+            <button id="saveChannels" class="primary">Save Channels</button>
+          </div>
+        `;
+        document.getElementById("saveChannels").onclick = async () => {
+          await api("/v1/settings/channels", {
+            method: "PATCH",
+            body: JSON.stringify({
+              slack: {
+                enabled: document.getElementById("channelSlackEnabled").value === "true",
+                webhookRef: document.getElementById("channelSlackRef").value
+              },
+              telegram: {
+                enabled: document.getElementById("channelTelegramEnabled").value === "true",
+                botTokenRef: document.getElementById("channelTelegramRef").value,
+                chatId: document.getElementById("channelTelegramChat").value
+              }
+            })
+          });
+          await loadAll();
+          appendMessage("Channel settings updated.");
+        };
+      }
+
+      function renderSettingsPolicies() {
+        const policies = appState.settings?.policies || {};
+        const box = document.getElementById("settings-policies");
+        box.innerHTML = `
+          <h3>Policies</h3>
+          <div class="form-grid">
+            <label>Autonomy Mode
+              <select id="policyMode">
+                <option value="manual" ${policies.autonomyMode === "manual" ? "selected" : ""}>manual</option>
+                <option value="policy-gated" ${policies.autonomyMode !== "manual" ? "selected" : ""}>policy-gated</option>
+              </select>
+            </label>
+            <label>Confidence Threshold<input id="policyConfidence" value="${policies.confidenceThreshold ?? 0.76}" type="number" step="0.01" min="0" max="1" /></label>
+            <label>Budget Guardrail<input id="policyBudget" value="${policies.budgetGuardrailUsd ?? 10000}" type="number" /></label>
+            <label>Kill Switch
+              <select id="policyKillSwitch">
+                <option value="true" ${policies.killSwitch ? "selected" : ""}>true</option>
+                <option value="false" ${!policies.killSwitch ? "selected" : ""}>false</option>
+              </select>
+            </label>
+            <button id="savePolicies" class="primary">Save Policies</button>
+          </div>
+        `;
+
+        document.getElementById("savePolicies").onclick = async () => {
+          await api("/v1/settings/policies", {
+            method: "PATCH",
+            body: JSON.stringify({
+              autonomyMode: document.getElementById("policyMode").value,
+              confidenceThreshold: Number(document.getElementById("policyConfidence").value),
+              budgetGuardrailUsd: Number(document.getElementById("policyBudget").value),
+              killSwitch: document.getElementById("policyKillSwitch").value === "true"
+            })
+          });
+          await loadAll();
+          appendMessage("Policies updated.");
+        };
+      }
+
+      async function renderSettings() {
+        renderSettingsGeneral();
+        renderSettingsConnections();
+        renderSettingsCredentials();
+        renderSettingsModels();
+        renderSettingsTraining();
+        renderSettingsReports();
+        renderSettingsSkills();
+        renderSettingsChannels();
+        renderSettingsPolicies();
+      }
+
+      function setSettingsTab(tab) {
+        appState.settingsTab = tab;
+        document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.settingsTab === tab);
+        });
+        document.querySelectorAll(".settings-section").forEach((section) => {
+          section.classList.toggle("active", section.id === `settings-${tab}`);
+        });
+      }
+
+      function setContextTab(tab) {
+        appState.contextTab = tab;
+        document.querySelectorAll("[data-context-tab]").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.contextTab === tab);
+        });
+        renderContextPanel();
+      }
+
+      async function refreshMetrics() {
+        const metrics = {};
+        for (const id of ["revenue", "profit", "spend"]) {
+          try {
+            const data = await api(`/v1/metrics/query?metricId=${id}&grain=week`, { method: "GET" });
+            metrics[id] = data.summary?.total || 0;
+          } catch {
+            metrics[id] = 0;
+          }
+        }
+        appState.metrics = metrics;
+      }
+
+      async function refreshSourceRunHistory() {
+        const connectionIds = [...new Set(
+          appState.runs
+            .map((run) => run.sourceConnectionId)
+            .filter(Boolean)
+        )];
+        const entries = await Promise.all(connectionIds.map(async (connectionId) => {
+          try {
+            const result = await api(`/v1/sources/connections/${encodeURIComponent(connectionId)}/runs`);
+            const runs = (result.runs || []).slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+            return [connectionId, runs];
+          } catch {
+            return [connectionId, []];
+          }
+        }));
+        appState.sourceRunHistoryByConnection = Object.fromEntries(entries);
+      }
+
+      async function refreshRunArtifacts() {
+        const run = currentRun();
+        if (!run) return;
+
+        if (run.artifacts?.insightId && !appState.insightById[run.artifacts.insightId]) {
+          try {
+            const result = await api(`/v1/insights/${encodeURIComponent(run.artifacts.insightId)}`);
+            appState.insightById[run.artifacts.insightId] = result.insight;
+          } catch {
+            // Keep UI functional even if artifact lookup is unavailable.
+          }
+        }
+
+        if (run.artifacts?.reportId && !appState.reportById[run.artifacts.reportId]) {
+          try {
+            const result = await api(`/v1/reports/${encodeURIComponent(run.artifacts.reportId)}`);
+            appState.reportById[run.artifacts.reportId] = result.report;
+          } catch {
+            // Keep UI functional even if artifact lookup is unavailable.
+          }
+        }
+      }
+
+      async function loadAll() {
+        if (!appState.tenantId) return;
+
+        const [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes] = await Promise.all([
+          api("/v1/settings"),
+          api("/v1/sources/connections"),
+          api("/v1/models/profiles"),
+          api("/v1/reports/types"),
+          api("/v1/skills/installed"),
+          api("/v1/skills/drafts").catch(() => ({ drafts: [] })),
+          api("/v1/analysis-runs"),
+          api("/v1/insights/latest"),
+          api("/v1/agents/actions/pending"),
+          api("/v1/channels/events")
+        ]);
+
+        appState.settings = settingsRes.settings;
+        appState.connections = connRes.connections || [];
+        appState.profiles = profilesRes.profiles || [];
+        appState.reportTypes = reportTypeRes.types || [];
+        appState.skillsInstalled = skillsRes.installed || [];
+        appState.skillDrafts = draftsRes.drafts || [];
+        appState.runs = runsRes.runs || [];
+        appState.latestInsight = insightRes.insight;
+        appState.pendingActions = actionsRes.actions || [];
+        appState.channelEvents = channelEventsRes.events || [];
+
+        if (!appState.activeRunId && appState.runs.length) {
+          appState.activeRunId = appState.runs[appState.runs.length - 1].id;
+        }
+
+        await refreshMetrics();
+        await refreshSourceRunHistory();
+        await refreshRunArtifacts();
+
+        renderOnboarding();
+        renderRunBuilder();
+        renderRunPreviews();
+        renderKPIs();
+        renderRunContextList();
+        renderRunList();
+        renderRunDetail();
+        renderContextPanel();
+        renderSettings();
+      }
+
       async function initTenant() {
-        const res = await fetch("/v1/tenants");
-        const data = await res.json();
-        if (!tenantId && data.tenants.length) {
-          tenantId = data.tenants[0].id;
+        const tenants = await api("/v1/tenants");
+        if (!appState.tenantId && tenants.tenants?.length) {
+          appState.tenantId = tenants.tenants[0].id;
         }
-        document.getElementById("tenantLabel").textContent = `Tenant: ${tenantId}`;
-      }
-
-      async function loadMetrics() {
-        const metricIds = ["revenue", "profit", "spend"];
-        const container = document.getElementById("metrics");
-        container.innerHTML = "";
-        for (const metricId of metricIds) {
-          const res = await fetch(`/v1/metrics/query?metricId=${metricId}&grain=week`, { headers: headers() });
-          const data = await res.json();
-          const card = document.createElement("div");
-          card.className = "metric";
-          card.innerHTML = `<div class="subtle">${metricId}</div><div class="v">${Math.round(data.summary?.total ?? 0)}</div>`;
-          container.appendChild(card);
+        if (!appState.tenantId) {
+          const created = await fetch("/v1/tenants", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: "Demo Tenant" })
+          }).then((r) => r.json());
+          appState.tenantId = created.tenant.id;
         }
+        document.getElementById("tenantLabel").textContent = `Tenant: ${appState.tenantId}`;
       }
 
-      async function loadActions() {
-        const res = await fetch("/v1/agents/actions/pending", { headers: headers() });
-        const data = await res.json();
-        const box = document.getElementById("actions");
-        box.innerHTML = "";
-        if (!data.actions?.length) {
-          box.innerHTML = `<div class="item">No pending actions</div>`;
-          return;
-        }
-        data.actions.forEach((a) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.textContent = `${a.actionType} (${a.policyDecision}) confidence=${a.confidence}`;
-          box.appendChild(el);
-        });
-      }
-
-      async function loadSources() {
-        const res = await fetch("/v1/sources/connections", { headers: headers() });
-        const data = await res.json();
-        const box = document.getElementById("sources");
-        box.innerHTML = "";
-        if (!data.connections?.length) {
-          box.innerHTML = `<div class="item">No source connections</div>`;
-          return;
-        }
-        data.connections.forEach((source) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.textContent = `${source.sourceType} (${source.mode}) - ${source.status}`;
-          box.appendChild(el);
-        });
-      }
-
-      async function loadSkills() {
-        const res = await fetch("/v1/skills/installed", { headers: headers() });
-        const data = await res.json();
-        const box = document.getElementById("skills");
-        box.innerHTML = "";
-        if (!data.installed?.length) {
-          box.innerHTML = `<div class="item">No installed skills</div>`;
-          return;
-        }
-        data.installed.forEach((skill) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.textContent = `${skill.id} - ${skill.active ? "active" : "inactive"}`;
-          box.appendChild(el);
-        });
-      }
-
-      async function loadLatestInsight() {
-        const res = await fetch("/v1/insights/latest", { headers: headers() });
-        const data = await res.json();
-        const box = document.getElementById("insight");
-        box.innerHTML = "";
-        if (!data.insight) {
-          box.innerHTML = `<div class="item">No insight yet</div>`;
-          return;
-        }
-        const el = document.createElement("div");
-        el.className = "item";
-        el.textContent = `${data.insight.summary} (confidence ${data.insight.confidence})`;
-        box.appendChild(el);
-      }
-
-      async function loadAudit() {
-        const res = await fetch("/v1/audit/events", { headers: headers() });
-        const data = await res.json();
-        const box = document.getElementById("audit");
-        box.innerHTML = "";
-        const events = (data.events || []).slice(-8).reverse();
-        events.forEach((e) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.textContent = `${e.action} @ ${new Date(e.at).toLocaleTimeString()}`;
-          box.appendChild(el);
-        });
-      }
-
-      async function runModel(promptText) {
-        const objective = /anomaly/i.test(promptText) ? "anomaly" : "forecast";
-        const body = { objective, outputMetricIds: ["revenue"], horizonDays: 7 };
-        const res = await fetch("/v1/models/run", { method: "POST", headers: headers(), body: JSON.stringify(body) });
-        const data = await res.json();
-        appendMessage(data.insight.summary, "ai");
-        await Promise.all([loadActions(), loadLatestInsight(), loadAudit()]);
-      }
-
-      document.getElementById("chatForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const input = document.getElementById("chatInput");
-        const text = input.value.trim();
-        if (!text) return;
-        appendMessage(text, "user");
-        input.value = "";
-        await runModel(text);
-      });
-
-      document.getElementById("syncMarketing").addEventListener("click", async () => {
-        await fetch("/v1/connectors/google_ads/sync", {
+      async function createDraftRunFromBuilder() {
+        const run = await api("/v1/analysis-runs", {
           method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ domain: "marketing", periodDays: 30 })
-        });
-        appendMessage("Marketing connector synced.");
-        await Promise.all([loadMetrics(), loadAudit()]);
-      });
-
-      document.getElementById("syncFinance").addEventListener("click", async () => {
-        await fetch("/v1/connectors/quickbooks/sync", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ domain: "finance", periodDays: 30 })
-        });
-        appendMessage("Finance connector synced.");
-        await Promise.all([loadMetrics(), loadAudit()]);
-      });
-
-      document.getElementById("runAgent").addEventListener("click", async () => {
-        await fetch("/v1/agents/jobs", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ jobType: "run_model", objective: "forecast", outputMetricIds: ["revenue"] })
-        });
-        appendMessage("Agent job executed.");
-        await Promise.all([loadActions(), loadLatestInsight(), loadAudit()]);
-      });
-
-      document.getElementById("generateReport").addEventListener("click", async () => {
-        await fetch("/v1/reports/generate", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ title: "Executive Digest", channels: ["email", "slack"], metricIds: ["revenue", "profit", "spend"] })
-        });
-        appendMessage("Report generated and delivered.");
-        await loadAudit();
-      });
-
-      document.getElementById("makeSchedule").addEventListener("click", async () => {
-        await fetch("/v1/reports/schedules", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ name: "Hourly Digest", intervalMinutes: 60, channels: ["email", "slack", "telegram"] })
-        });
-        appendMessage("Hourly report schedule created.");
-        await loadAudit();
-      });
-
-      document.getElementById("createSource").addEventListener("click", async () => {
-        await fetch("/v1/sources/connections", {
-          method: "POST",
-          headers: headers(),
           body: JSON.stringify({
-            sourceType: "hubspot",
-            mode: "hybrid",
-            auth: { token: "demo-hubspot-token" },
-            syncPolicy: { intervalMinutes: 120, backfillDays: 30 }
+            sourceConnectionId: document.getElementById("runSourceSelect").value || null,
+            modelProfileId: document.getElementById("runModelSelect").value || null,
+            reportTypeId: document.getElementById("runReportSelect").value || null,
+            skillId: document.getElementById("runSkillSelect").value || null,
+            channels: document.getElementById("runChannelsInput").value.split(",").map((s) => s.trim()).filter(Boolean)
           })
         });
-        appendMessage("HubSpot source connection added.");
-        await Promise.all([loadSources(), loadAudit()]);
-      });
+        appState.activeRunId = run.run.id;
+        await loadAll();
+        await previewCurrentRunOutput();
+        appendMessage(`Draft analysis run created: ${run.run.id}`);
+      }
 
-      document.getElementById("syncSource").addEventListener("click", async () => {
-        const list = await fetch("/v1/sources/connections", { headers: headers() }).then((r) => r.json());
-        const first = list.connections?.[0];
-        if (!first) {
-          appendMessage("No source connection available to sync.");
+      async function executeCurrentRun() {
+        if (!appState.activeRunId) {
+          await createDraftRunFromBuilder();
+        }
+        const runId = appState.activeRunId;
+        const runRes = await api(`/v1/analysis-runs/${encodeURIComponent(runId)}/execute`, { method: "POST", body: JSON.stringify({ forceSync: true }) });
+        appState.activeRunId = runRes.run.id;
+        await loadAll();
+        await previewCurrentRunOutput();
+        appendMessage(`Analysis run ${runRes.run.id} ${runRes.run.status}.`);
+      }
+
+      async function deliverCurrentRun() {
+        const run = currentRun();
+        if (!run) {
+          appendMessage("Create or select a run before delivery.");
           return;
         }
-        await fetch(`/v1/sources/connections/${encodeURIComponent(first.id)}/sync`, {
+        const channels = document.getElementById("runChannelsInput").value.split(",").map((s) => s.trim()).filter(Boolean);
+        await api(`/v1/analysis-runs/${encodeURIComponent(run.id)}/deliver`, {
           method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ periodDays: 30 })
+          body: JSON.stringify({ channels })
         });
-        appendMessage(`Source ${first.sourceType} synced.`);
-        await Promise.all([loadMetrics(), loadSources(), loadAudit()]);
-      });
+        await loadAll();
+        await previewCurrentRunOutput();
+        appendMessage(`Run ${run.id} delivered to ${channels.join(", ")}.`);
+      }
 
-      document.getElementById("installSkill").addEventListener("click", async () => {
-        await fetch("/v1/skills/install", {
+      async function retryDeliveryEvent(eventId) {
+        const run = currentRun();
+        if (!run) return;
+        const reportType = appState.reportTypes.find((item) => item.id === run.reportTypeId) || null;
+        const insight = run?.artifacts?.insightId ? appState.insightById[run.artifacts.insightId] : appState.latestInsight;
+        await api(`/v1/channels/events/${encodeURIComponent(eventId)}/retry`, {
           method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ skillId: "marketing-optimizer", active: true })
-        });
-        appendMessage("Marketing skill installed.");
-        await Promise.all([loadSkills(), loadAudit()]);
-      });
-
-      document.getElementById("runSkill").addEventListener("click", async () => {
-        const res = await fetch("/v1/skills/run", {
-          method: "POST",
-          headers: headers(),
           body: JSON.stringify({
-            intent: "marketing_optimization",
-            channel: "web",
-            requestedTools: ["model.run", "reports.generate"],
-            estimatedTokens: 1200,
-            timeoutMs: 3000,
-            generateReport: true,
-            channels: ["email", "slack"]
+            templates: reportType?.deliveryTemplates || {},
+            context: {
+              runId: run.id,
+              insightId: insight?.id || "n/a",
+              confidence: insight?.confidence ?? null,
+              actionsCount: insight?.recommendedActions?.length ?? 0
+            }
           })
         });
-        const data = await res.json();
-        appendMessage(`Skill run complete: ${data.run.skillId} (${data.run.status}).`);
-        await Promise.all([loadActions(), loadLatestInsight(), loadSkills(), loadAudit()]);
-      });
+        await loadAll();
+        renderRunDetail();
+        appendMessage(`Delivery event ${eventId} retried.`);
+      }
 
-      document.getElementById("refreshAudit").addEventListener("click", loadAudit);
+      async function runChatIntent(promptText) {
+        const profile = appState.profiles.find((item) => item.id === document.getElementById("runModelSelect").value) || appState.profiles.find((item) => item.active) || null;
+        if (!profile) {
+          appendMessage("No model profile available. Configure one in Settings > Models.");
+          return;
+        }
+
+        const response = await api("/v1/models/run", {
+          method: "POST",
+          body: JSON.stringify({
+            objective: /anomaly/i.test(promptText) ? "anomaly" : profile.objective,
+            outputMetricIds: [profile.targetMetricId],
+            horizonDays: profile.horizonDays,
+            provider: profile.provider
+          })
+        });
+
+        appendMessage(response.insight.summary, "ai");
+        await loadAll();
+      }
+
+      function openSettingsTab(tab) {
+        setRoute("settings");
+        setSettingsTab(tab);
+      }
+
+      async function runWorkspaceCommand(raw) {
+        const command = String(raw || "").trim().toLowerCase();
+        if (!command) return;
+
+        if (command === "new run") {
+          await createDraftRunFromBuilder();
+          return;
+        }
+        if (command === "execute run") {
+          await executeCurrentRun();
+          return;
+        }
+        if (command === "deliver run") {
+          await deliverCurrentRun();
+          return;
+        }
+        if (command === "open settings connections") {
+          openSettingsTab("connections");
+          return;
+        }
+        if (command === "open settings channels") {
+          openSettingsTab("channels");
+          return;
+        }
+        if (command === "open settings models") {
+          openSettingsTab("models");
+          return;
+        }
+        if (command === "open settings skills") {
+          openSettingsTab("skills");
+          return;
+        }
+        appendMessage("Unknown command. Try: new run | execute run | deliver run | open settings connections/channels/models/skills");
+      }
+
+      function bindEvents() {
+        document.querySelectorAll("[data-route-target]").forEach((btn) => {
+          btn.onclick = () => setRoute(btn.dataset.routeTarget);
+        });
+
+        document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+          btn.onclick = () => setSettingsTab(btn.dataset.settingsTab);
+        });
+
+        document.querySelectorAll("[data-context-tab]").forEach((btn) => {
+          btn.onclick = () => setContextTab(btn.dataset.contextTab);
+        });
+
+        document.getElementById("createRunBtn").onclick = createDraftRunFromBuilder;
+        document.getElementById("executeRunBtn").onclick = executeCurrentRun;
+        document.getElementById("deliverRunBtn").onclick = deliverCurrentRun;
+        document.getElementById("previewRunBtn").onclick = previewCurrentRunOutput;
+        document.getElementById("quickNewRunBtn").onclick = createDraftRunFromBuilder;
+        document.getElementById("quickExecuteBtn").onclick = executeCurrentRun;
+        document.getElementById("quickDeliverBtn").onclick = deliverCurrentRun;
+        document.getElementById("quickSettingsBtn").onclick = () => openSettingsTab("connections");
+        document.getElementById("quickSkillsBtn").onclick = () => openSettingsTab("skills");
+
+        ["runSourceSelect", "runModelSelect", "runReportSelect", "runSkillSelect", "runChannelsInput"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener("change", () => {
+            previewCurrentRunOutput().catch((error) => appendMessage(`Preview error: ${error.message}`));
+          });
+        });
+
+        document.getElementById("commandForm").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const input = document.getElementById("commandInput");
+          const text = input.value.trim();
+          input.value = "";
+          await runWorkspaceCommand(text);
+        });
+
+        window.addEventListener("keydown", (event) => {
+          const isCommandPalette = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+          if (!isCommandPalette) return;
+          event.preventDefault();
+          const input = document.getElementById("commandInput");
+          input.focus();
+          input.select();
+        });
+
+        document.getElementById("chatForm").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const input = document.getElementById("chatInput");
+          const text = input.value.trim();
+          if (!text) return;
+          appendMessage(text, "user");
+          input.value = "";
+          await runChatIntent(text);
+        });
+      }
 
       async function boot() {
+        bindEvents();
+        renderSavedPrompts();
+        renderThreadList();
         await initTenant();
-        appendMessage("Workspace ready. Ask for forecast or anomaly analysis.");
-        await Promise.all([loadMetrics(), loadSources(), loadSkills(), loadActions(), loadLatestInsight(), loadAudit()]);
+        appendMessage("Welcome to InsightFoundry. Start by reviewing onboarding, then create a guided analysis run.");
+        await loadAll();
+        await previewCurrentRunOutput();
       }
 
-      boot();
+      boot().catch((error) => {
+        appendMessage(`Initialization error: ${error.message}`);
+      });
     </script>
   </body>
 </html>

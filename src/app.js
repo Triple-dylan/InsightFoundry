@@ -12,11 +12,13 @@ import { authContextFromHeaders, requireRole, requireTenantHeader } from "./lib/
 import { pushAudit, listAudit } from "./lib/audit.js";
 import { listBlueprints } from "./lib/blueprints.js";
 import { startScheduler } from "./lib/scheduler.js";
+import { notifyReportDelivery, previewReportDelivery, retryChannelEvent } from "./lib/channels.js";
 import {
   listSourceCatalog,
   createSourceConnection,
   listSourceConnections,
   requireSourceConnection,
+  patchSourceConnection,
   testSourceConnection,
   runSourceSync,
   listSourceConnectionRuns
@@ -30,6 +32,48 @@ import {
   listSkillRuns,
   setSkillActivation
 } from "./lib/skills.js";
+import {
+  getTenantSettings,
+  patchSettingsGeneral,
+  patchSettingsModelPreferences,
+  patchSettingsTraining,
+  patchSettingsPolicies,
+  getSettingsChannels,
+  patchSettingsChannels,
+  ensureTenantSettings
+} from "./lib/settings.js";
+import {
+  listPresetProfiles,
+  ensureDefaultModelProfiles,
+  listModelProfiles,
+  createModelProfile,
+  requireModelProfile,
+  patchModelProfile,
+  activateModelProfile
+} from "./lib/model-profiles.js";
+import {
+  ensureDefaultReportTypes,
+  listReportTypes,
+  createReportType,
+  requireReportType,
+  patchReportType,
+  previewReportType
+} from "./lib/report-types.js";
+import {
+  createSkillDraft,
+  patchSkillDraft,
+  requireSkillDraft,
+  validateSkillDraft,
+  publishSkillDraft
+} from "./lib/skill-drafts.js";
+import {
+  createAnalysisRun,
+  listAnalysisRuns,
+  requireAnalysisRun,
+  executeAnalysisRun,
+  deliverAnalysisRun
+} from "./lib/analysis-runs.js";
+import { createPersistence, loadStateFromPersistence, saveStateToPersistence } from "./lib/persistence.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = path.join(__dirname, "public", "index.html");
@@ -119,16 +163,31 @@ function demoSeed(state) {
 
   installSkillPack(state, tenant, { skillId: "marketing-optimizer", active: true });
   installSkillPack(state, tenant, { skillId: "finance-forecast-analyst", active: true });
+  ensureTenantSettings(state, tenant);
+  ensureDefaultModelProfiles(state, tenant);
+  ensureDefaultReportTypes(state, tenant);
 
   return tenant;
 }
 
-export function createPlatform({ seedDemo = true, startBackground = true } = {}) {
+export async function createPlatform({ seedDemo = true, startBackground = true } = {}) {
   const state = createState();
-  const demoTenant = seedDemo ? demoSeed(state) : null;
+  const persistence = await createPersistence();
+  const hydrated = await loadStateFromPersistence(state, persistence);
+  let demoTenant = null;
+  if (seedDemo && !hydrated && state.tenants.size === 0) {
+    demoTenant = demoSeed(state);
+    await saveStateToPersistence(state, persistence);
+  } else if (state.tenants.size > 0) {
+    demoTenant = [...state.tenants.values()][0];
+  }
+
+  const persistState = async () => {
+    await saveStateToPersistence(state, persistence);
+  };
 
   const stopScheduler = startBackground
-    ? startScheduler(state, (schedule) => {
+    ? startScheduler(state, async (schedule) => {
         const tenant = requireTenant(state, schedule.tenantId);
         const result = generateReport(state, tenant, {
           title: `${schedule.name} (${tenant.name})`,
@@ -146,6 +205,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             reportId: result.report.id
           }
         });
+        await persistState();
       })
     : () => {};
 
@@ -164,6 +224,11 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
 
       if (method === "GET" && pathname === "/healthz") {
         respondJson(res, 200, { ok: true, uptimeSec: process.uptime() });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/feature-flags") {
+        respondJson(res, 200, { flags: state.featureFlags });
         return;
       }
 
@@ -199,8 +264,352 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
           action: "tenant_created",
           details: { blueprintId: tenant.blueprintId }
         });
+        ensureTenantSettings(state, tenant);
+        ensureDefaultModelProfiles(state, tenant);
+        ensureDefaultReportTypes(state, tenant);
+        await persistState();
 
         respondJson(res, 201, { tenant });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/settings") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureDefaultModelProfiles(state, tenant);
+        ensureDefaultReportTypes(state, tenant);
+        const settings = getTenantSettings(state, tenant);
+        respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/general") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = patchSettingsGeneral(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_general_updated", details: {} });
+        await persistState();
+        respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/model-preferences") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = patchSettingsModelPreferences(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_model_preferences_updated", details: {} });
+        await persistState();
+        respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/training") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = patchSettingsTraining(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_training_updated", details: {} });
+        await persistState();
+        respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/policies") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = patchSettingsPolicies(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_policies_updated", details: {} });
+        await persistState();
+        respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/settings/channels") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const channels = getSettingsChannels(state, tenant);
+        respondJson(res, 200, { channels });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/channels") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const channels = patchSettingsChannels(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_channels_updated", details: {} });
+        await persistState();
+        respondJson(res, 200, { channels });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/models/profiles") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureDefaultModelProfiles(state, tenant);
+        respondJson(res, 200, { presets: listPresetProfiles(), profiles: listModelProfiles(state, tenant.id) });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/models/profiles") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const profile = createModelProfile(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "model_profile_created", details: { profileId: profile.id } });
+        await persistState();
+        respondJson(res, 201, { profile });
+        return;
+      }
+
+      const modelProfilePatchMatch = pathMatcher(pathname, "/v1/models/profiles/:profileId");
+      if (method === "PATCH" && modelProfilePatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const profile = patchModelProfile(state, ctx.tenantId, modelProfilePatchMatch.profileId, body);
+        pushAudit(state, { tenantId: ctx.tenantId, actorId: ctx.userId, action: "model_profile_updated", details: { profileId: profile.id } });
+        await persistState();
+        respondJson(res, 200, { profile });
+        return;
+      }
+
+      const modelProfileActivateMatch = pathMatcher(pathname, "/v1/models/profiles/:profileId/activate");
+      if (method === "POST" && modelProfileActivateMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const profile = activateModelProfile(state, tenant, modelProfileActivateMatch.profileId);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "model_profile_activated", details: { profileId: profile.id } });
+        await persistState();
+        respondJson(res, 200, { profile });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/reports/types") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureDefaultReportTypes(state, tenant);
+        respondJson(res, 200, { types: listReportTypes(state, tenant.id) });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/reports/types") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const reportType = createReportType(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "report_type_created", details: { typeId: reportType.id } });
+        await persistState();
+        respondJson(res, 201, { reportType });
+        return;
+      }
+
+      const reportTypePatchMatch = pathMatcher(pathname, "/v1/reports/types/:typeId");
+      if (method === "PATCH" && reportTypePatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const reportType = patchReportType(state, ctx.tenantId, reportTypePatchMatch.typeId, body);
+        pushAudit(state, { tenantId: ctx.tenantId, actorId: ctx.userId, action: "report_type_updated", details: { typeId: reportType.id } });
+        await persistState();
+        respondJson(res, 200, { reportType });
+        return;
+      }
+
+      const reportTypePreviewMatch = pathMatcher(pathname, "/v1/reports/types/:typeId/preview");
+      if (method === "POST" && reportTypePreviewMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const type = requireReportType(state, ctx.tenantId, reportTypePreviewMatch.typeId);
+        const latestInsight = [...state.insights]
+          .filter((item) => item.tenantId === ctx.tenantId)
+          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+        const preview = previewReportType(type, { latestInsightSummary: latestInsight?.summary });
+        respondJson(res, 200, { preview });
+        return;
+      }
+
+      const reportTypeDeliveryPreviewMatch = pathMatcher(pathname, "/v1/reports/types/:typeId/delivery-preview");
+      if (method === "POST" && reportTypeDeliveryPreviewMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const type = requireReportType(state, ctx.tenantId, reportTypeDeliveryPreviewMatch.typeId);
+        const body = await parseJsonBody(req);
+        const channels = Array.isArray(body.channels) && body.channels.length
+          ? body.channels
+          : type.defaultChannels;
+        const report = {
+          id: "preview_report",
+          title: body.reportTitle ?? type.name,
+          summary: body.reportSummary ?? "Preview summary"
+        };
+        const previews = previewReportDelivery(state, ctx.tenantId, channels, report, {
+          templates: {
+            ...(type.deliveryTemplates ?? {}),
+            ...(body.deliveryTemplates ?? {})
+          },
+          context: body.context
+        });
+        respondJson(res, 200, { previews });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/skills/drafts") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const draft = createSkillDraft(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "skill_draft_created", details: { draftId: draft.draftId } });
+        await persistState();
+        respondJson(res, 201, { draft });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/skills/drafts") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const drafts = state.skillDrafts.filter((item) => item.tenantId === ctx.tenantId);
+        respondJson(res, 200, { drafts });
+        return;
+      }
+
+      const skillDraftPatchMatch = pathMatcher(pathname, "/v1/skills/drafts/:draftId");
+      if (method === "PATCH" && skillDraftPatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const draft = patchSkillDraft(state, ctx.tenantId, skillDraftPatchMatch.draftId, body);
+        pushAudit(state, { tenantId: ctx.tenantId, actorId: ctx.userId, action: "skill_draft_updated", details: { draftId: draft.draftId } });
+        await persistState();
+        respondJson(res, 200, { draft });
+        return;
+      }
+
+      const skillDraftValidateMatch = pathMatcher(pathname, "/v1/skills/drafts/:draftId/validate");
+      if (method === "POST" && skillDraftValidateMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const result = validateSkillDraft(state, ctx.tenantId, skillDraftValidateMatch.draftId);
+        await persistState();
+        respondJson(res, 200, { result });
+        return;
+      }
+
+      const skillDraftPublishMatch = pathMatcher(pathname, "/v1/skills/drafts/:draftId/publish");
+      if (method === "POST" && skillDraftPublishMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const result = publishSkillDraft(state, tenant, skillDraftPublishMatch.draftId, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "skill_draft_published", details: { draftId: skillDraftPublishMatch.draftId, skillId: result.install.id } });
+        await persistState();
+        respondJson(res, 201, result);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/analysis-runs") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const run = createAnalysisRun(state, tenant, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "analysis_run_created", details: { runId: run.id } });
+        await persistState();
+        respondJson(res, 201, { run });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/analysis-runs") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        respondJson(res, 200, { runs: listAnalysisRuns(state, ctx.tenantId) });
+        return;
+      }
+
+      const analysisRunMatch = pathMatcher(pathname, "/v1/analysis-runs/:runId");
+      if (method === "GET" && analysisRunMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const run = requireAnalysisRun(state, ctx.tenantId, analysisRunMatch.runId);
+        respondJson(res, 200, { run });
+        return;
+      }
+
+      const analysisRunExecuteMatch = pathMatcher(pathname, "/v1/analysis-runs/:runId/execute");
+      if (method === "POST" && analysisRunExecuteMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const run = requireAnalysisRun(state, ctx.tenantId, analysisRunExecuteMatch.runId);
+        const executed = executeAnalysisRun(state, tenant, run, {
+          requireSourceConnection,
+          runSourceSync,
+          requireModelProfile,
+          runModelTask,
+          requireReportType,
+          generateReport,
+          runSkillPack
+        }, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "analysis_run_executed", details: { runId: executed.id, status: executed.status } });
+        await persistState();
+        respondJson(res, 200, { run: executed });
+        return;
+      }
+
+      const analysisRunDeliverMatch = pathMatcher(pathname, "/v1/analysis-runs/:runId/deliver");
+      if (method === "POST" && analysisRunDeliverMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const run = requireAnalysisRun(state, ctx.tenantId, analysisRunDeliverMatch.runId);
+        const delivered = deliverAnalysisRun(state, tenant, run, { notifyReportDelivery }, body);
+        pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "analysis_run_delivered", details: { runId: run.id, channelEvents: delivered.events.length } });
+        await persistState();
+        respondJson(res, 200, delivered);
         return;
       }
 
@@ -228,6 +637,8 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             mode: connection.mode
           }
         });
+        ensureTenantSettings(state, tenant);
+        await persistState();
 
         respondJson(res, 201, { connection });
         return;
@@ -238,6 +649,28 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
         requireTenantHeader(ctx);
         const connections = listSourceConnections(state, ctx.tenantId);
         respondJson(res, 200, { connections });
+        return;
+      }
+
+      const sourceConnectionPatchMatch = pathMatcher(pathname, "/v1/sources/connections/:connectionId");
+      if (method === "PATCH" && sourceConnectionPatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        requireTenant(state, ctx.tenantId);
+
+        const body = await parseJsonBody(req);
+        const connection = patchSourceConnection(state, ctx.tenantId, sourceConnectionPatchMatch.connectionId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "source_connection_updated",
+          details: {
+            connectionId: connection.id
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { connection });
         return;
       }
 
@@ -260,6 +693,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: result.status
           }
         });
+        await persistState();
 
         respondJson(res, 200, result);
         return;
@@ -286,6 +720,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: result.syncStatus
           }
         });
+        await persistState();
 
         respondJson(res, 200, result);
         return;
@@ -323,6 +758,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: result.syncStatus
           }
         });
+        await persistState();
 
         respondJson(res, 200, result);
         return;
@@ -387,6 +823,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             insertedRecords: run.insertedRecords
           }
         });
+        await persistState();
 
         respondJson(res, 201, { run });
         return;
@@ -418,6 +855,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: result.run.status
           }
         });
+        await persistState();
 
         respondJson(res, 200, result);
         return;
@@ -445,6 +883,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             skillId: install.id
           }
         });
+        await persistState();
 
         respondJson(res, 201, { install });
         return;
@@ -481,6 +920,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: run.status
           }
         });
+        await persistState();
 
         respondJson(res, 200, { run });
         return;
@@ -511,6 +951,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             skillId: skill.id
           }
         });
+        await persistState();
 
         respondJson(res, 200, { skill });
         return;
@@ -532,6 +973,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             skillId: skill.id
           }
         });
+        await persistState();
 
         respondJson(res, 200, { skill });
         return;
@@ -555,6 +997,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             channels: body.channels ?? ["email"]
           }
         });
+        await persistState();
 
         respondJson(res, 201, result);
         return;
@@ -575,6 +1018,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
           action: "report_schedule_created",
           details: { scheduleId: schedule.id }
         });
+        await persistState();
 
         respondJson(res, 201, { schedule });
         return;
@@ -593,6 +1037,28 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
         requireTenantHeader(ctx);
         const events = state.channelEvents.filter((item) => item.tenantId === ctx.tenantId);
         respondJson(res, 200, { events });
+        return;
+      }
+
+      const channelRetryMatch = pathMatcher(pathname, "/v1/channels/events/:eventId/retry");
+      if (method === "POST" && channelRetryMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const body = await parseJsonBody(req);
+        const event = retryChannelEvent(state, ctx.tenantId, channelRetryMatch.eventId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "channel_event_retried",
+          details: {
+            eventId: event.id,
+            status: event.status,
+            attemptCount: event.attemptCount
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { event });
         return;
       }
 
@@ -615,6 +1081,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             status: job.status
           }
         });
+        await persistState();
 
         respondJson(res, 201, { job });
         return;
@@ -637,6 +1104,7 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
             decision: body.decision
           }
         });
+        await persistState();
 
         respondJson(res, 200, { approval });
         return;
@@ -660,6 +1128,36 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
         return;
       }
 
+      const insightMatch = pathMatcher(pathname, "/v1/insights/:insightId");
+      if (method === "GET" && insightMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const insight = state.insights.find(
+          (item) => item.tenantId === ctx.tenantId && item.id === insightMatch.insightId
+        );
+        if (!insight) {
+          respondJson(res, 404, { error: `Insight '${insightMatch.insightId}' not found` });
+          return;
+        }
+        respondJson(res, 200, { insight });
+        return;
+      }
+
+      const reportMatch = pathMatcher(pathname, "/v1/reports/:reportId");
+      if (method === "GET" && reportMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const report = state.reports.find(
+          (item) => item.tenantId === ctx.tenantId && item.id === reportMatch.reportId
+        );
+        if (!report) {
+          respondJson(res, 404, { error: `Report '${reportMatch.reportId}' not found` });
+          return;
+        }
+        respondJson(res, 200, { report });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/audit/events") {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
@@ -679,7 +1177,9 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
       const statusCode = Number(error.statusCode ?? 500);
       respondJson(res, statusCode, {
         error: error.message,
-        statusCode
+        statusCode,
+        checks: error.checks,
+        details: error.details
       });
     }
   });
@@ -690,7 +1190,6 @@ export function createPlatform({ seedDemo = true, startBackground = true } = {})
     demoTenant,
     close: () => {
       stopScheduler();
-      server.close();
     }
   };
 }

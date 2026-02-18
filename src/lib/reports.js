@@ -50,7 +50,10 @@ export function generateReport(state, tenant, payload = {}) {
   state.reports.push(report);
 
   const deliveryChannels = payload.channels ?? ["email"];
-  const deliveryEvents = notifyReportDelivery(state, tenant.id, deliveryChannels, report);
+  const deliveryEvents = notifyReportDelivery(state, tenant.id, deliveryChannels, report, {
+    templates: payload.channelTemplates,
+    context: payload.channelTemplateContext
+  });
 
   return { report, deliveryEvents };
 }

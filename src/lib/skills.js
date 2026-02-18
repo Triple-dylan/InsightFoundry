@@ -46,7 +46,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function validateSkillManifest(manifest) {
+export function validateSkillManifest(manifest) {
   const required = ["id", "version", "name", "description", "triggers", "tools", "guardrails", "prompts", "schedules"];
   for (const key of required) {
     if (!manifest[key]) {
@@ -173,41 +173,66 @@ function classifySkill(installedSkills, payload = {}) {
 }
 
 function assertSkillSafety(tenant, skill, payload = {}) {
+  const checks = [];
   if (tenant.autonomyPolicy.killSwitch) {
+    checks.push({ check: "tenant_kill_switch", status: "fail", detail: "Tenant kill switch is enabled" });
     const err = new Error("Tenant kill switch is enabled");
     err.statusCode = 403;
+    err.checks = checks;
     throw err;
   }
+  checks.push({ check: "tenant_kill_switch", status: "pass", detail: "Tenant kill switch is off" });
 
   if (skill.manifest.guardrails.killSwitch) {
+    checks.push({ check: "skill_kill_switch", status: "fail", detail: "Skill kill switch is enabled" });
     const err = new Error("Skill kill switch is enabled");
     err.statusCode = 403;
+    err.checks = checks;
     throw err;
   }
+  checks.push({ check: "skill_kill_switch", status: "pass", detail: "Skill kill switch is off" });
 
   const requestedTools = payload.requestedTools ?? [];
   const allowedTools = new Set(skill.manifest.tools.filter((t) => t.allow).map((t) => t.id));
   for (const tool of requestedTools) {
     if (!allowedTools.has(tool)) {
+      checks.push({ check: "tool_allowlist", status: "fail", detail: `Tool '${tool}' is not allowed` });
       const err = new Error(`Skill tool '${tool}' is not allowed by manifest policy`);
       err.statusCode = 403;
+      err.checks = checks;
       throw err;
     }
   }
+  checks.push({ check: "tool_allowlist", status: "pass", detail: "All requested tools are allowlisted" });
 
   const tokenEstimate = Number(payload.estimatedTokens ?? 0);
   if (tokenEstimate > Number(skill.manifest.guardrails.tokenBudget ?? 0)) {
+    checks.push({
+      check: "token_budget",
+      status: "fail",
+      detail: `${tokenEstimate} exceeds ${Number(skill.manifest.guardrails.tokenBudget ?? 0)}`
+    });
     const err = new Error("Skill token budget exceeded");
     err.statusCode = 400;
+    err.checks = checks;
     throw err;
   }
+  checks.push({ check: "token_budget", status: "pass", detail: `${tokenEstimate} within budget` });
 
   const timeoutMs = Number(payload.timeoutMs ?? 0);
   if (timeoutMs > Number(skill.manifest.guardrails.timeBudgetMs ?? 0)) {
+    checks.push({
+      check: "time_budget",
+      status: "fail",
+      detail: `${timeoutMs} exceeds ${Number(skill.manifest.guardrails.timeBudgetMs ?? 0)}`
+    });
     const err = new Error("Skill time budget exceeded");
     err.statusCode = 400;
+    err.checks = checks;
     throw err;
   }
+  checks.push({ check: "time_budget", status: "pass", detail: `${timeoutMs} within budget` });
+  return checks;
 }
 
 export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
@@ -233,7 +258,7 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
     throw err;
   }
 
-  assertSkillSafety(tenant, selected, payload);
+  const guardrailChecks = assertSkillSafety(tenant, selected, payload);
 
   const baseId = selected.baseId;
   const artifacts = {};
@@ -265,12 +290,36 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
     status: "completed",
     confidence: artifacts.model?.insight?.confidence ?? 0.7,
     artifacts,
+    trace: {
+      routing: {
+        requestedSkillId: payload.skillId ?? null,
+        selectedSkillId: selected.id,
+        channel: payload.channel ?? "web",
+        intent: payload.intent ?? "unspecified"
+      },
+      tools: {
+        requested: payload.requestedTools ?? [],
+        allowed: selected.manifest.tools.filter((tool) => tool.allow).map((tool) => tool.id)
+      },
+      guardrails: guardrailChecks
+    },
     createdAt: new Date().toISOString()
   };
 
   if (run.confidence < Number(selected.manifest.guardrails.confidenceMin ?? 0)) {
     run.status = "completed_with_warning";
     run.warning = "confidence_below_skill_threshold";
+    run.trace.guardrails.push({
+      check: "confidence_threshold",
+      status: "warn",
+      detail: `${run.confidence} below ${Number(selected.manifest.guardrails.confidenceMin ?? 0)}`
+    });
+  } else {
+    run.trace.guardrails.push({
+      check: "confidence_threshold",
+      status: "pass",
+      detail: `${run.confidence} meets threshold`
+    });
   }
 
   state.skillRuns.push(run);
