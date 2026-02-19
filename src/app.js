@@ -37,6 +37,29 @@ import {
   createThreadComment
 } from "./lib/collaboration.js";
 import {
+  ensureWorkspaceCoreDefaults,
+  listThreadMessages,
+  createChatMessage,
+  listMessageReplies,
+  getMiniThread,
+  createAiReplyForMessage,
+  listThreadAttachments,
+  listNotifications,
+  markNotificationRead,
+  getWorkspaceAgentProfile,
+  patchWorkspaceAgentProfile,
+  patchTeamMemberAppearance,
+  listTeamMemberAppearance,
+  listFolderAutomations,
+  createFolderAutomation,
+  patchFolderAutomation,
+  runFolderAutomation,
+  listAutomationRuns,
+  parseHeartbeatContent,
+  validateHeartbeatContent,
+  processFolderAutomations
+} from "./lib/workspace-core.js";
+import {
   listMcpProviderCatalog,
   listMcpServers,
   createMcpServer,
@@ -200,6 +223,7 @@ function demoSeed(state) {
   ensureDefaultModelProfiles(state, tenant);
   ensureDefaultReportTypes(state, tenant);
   ensureCollaborationDefaults(state, tenant);
+  ensureWorkspaceCoreDefaults(state, tenant);
 
   return tenant;
 }
@@ -242,6 +266,43 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         await persistState();
       })
     : () => {};
+
+  const automationTimer = startBackground
+    ? setInterval(async () => {
+        const runs = processFolderAutomations(state, {
+          runSkillPack,
+          runModelTask,
+          generateReport,
+          createAgentJob: (localState, tenant, payload) => createAgentJob(localState, tenant, payload, {
+            requireWorkspaceFolder,
+            requireWorkspaceThread,
+            createThreadComment,
+            runSkillPack,
+            runModelTask,
+            generateReport
+          }),
+          createDeviceCommandRequest: (localState, tenant, payload) => createDeviceCommandRequest(localState, tenant, payload, {
+            requireWorkspaceFolder,
+            requireWorkspaceThread
+          })
+        });
+        if (!runs.length) return;
+        runs.forEach((run) => {
+          pushAudit(state, {
+            tenantId: run.tenantId,
+            actorId: "automation_scheduler",
+            action: "folder_automation_run",
+            details: {
+              automationId: run.automationId,
+              runId: run.id,
+              status: run.status,
+              triggerType: run.triggerType
+            }
+          });
+        });
+        await persistState();
+      }, 5_000)
+    : null;
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -302,6 +363,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         ensureDefaultModelProfiles(state, tenant);
         ensureDefaultReportTypes(state, tenant);
         ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
         await persistState();
 
         respondJson(res, 201, { tenant });
@@ -315,6 +377,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         ensureDefaultModelProfiles(state, tenant);
         ensureDefaultReportTypes(state, tenant);
         ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
         const settings = getTenantSettings(state, tenant);
         respondJson(res, 200, { settings });
         return;
@@ -499,7 +562,11 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireTenantHeader(ctx);
         const tenant = requireTenant(state, ctx.tenantId);
         ensureCollaborationDefaults(state, tenant);
-        respondJson(res, 200, { team: listTeamMembers(state, tenant.id) });
+        ensureWorkspaceCoreDefaults(state, tenant);
+        respondJson(res, 200, {
+          team: listTeamMembers(state, tenant.id),
+          appearance: listTeamMemberAppearance(state, tenant.id)
+        });
         return;
       }
 
@@ -540,11 +607,60 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      const teamMemberAppearanceMatch = pathMatcher(pathname, "/v1/settings/team/:memberId/appearance");
+      if (method === "PATCH" && teamMemberAppearanceMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const appearance = patchTeamMemberAppearance(state, ctx.tenantId, teamMemberAppearanceMatch.memberId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "team_member_appearance_updated",
+          details: { memberId: teamMemberAppearanceMatch.memberId, colorMode: appearance.colorMode }
+        });
+        await persistState();
+        respondJson(res, 200, { appearance });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/settings/workspace-agent") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const profile = getWorkspaceAgentProfile(state, tenant.id);
+        respondJson(res, 200, { profile });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/workspace-agent") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const profile = patchWorkspaceAgentProfile(state, tenant.id, body);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_agent_profile_updated",
+          details: { name: profile.name, tonePreset: profile.tonePreset }
+        });
+        await persistState();
+        respondJson(res, 200, { profile });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/workspace/folders") {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
         const tenant = requireTenant(state, ctx.tenantId);
         ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
         respondJson(res, 200, { folders: listWorkspaceFolders(state, tenant.id) });
         return;
       }
@@ -591,6 +707,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireTenantHeader(ctx);
         const tenant = requireTenant(state, ctx.tenantId);
         ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
         const folderId = base.searchParams.get("folderId") ?? undefined;
         respondJson(res, 200, { threads: listWorkspaceThreads(state, tenant.id, { folderId }) });
         return;
@@ -618,9 +735,177 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       if (method === "GET" && workspaceThreadMatch) {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
-        requireTenant(state, ctx.tenantId);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
         const thread = requireWorkspaceThread(state, ctx.tenantId, workspaceThreadMatch.threadId);
         respondJson(res, 200, { thread });
+        return;
+      }
+
+      const workspaceChatMessagesMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/messages");
+      if (method === "GET" && workspaceChatMessagesMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const messages = listThreadMessages(state, ctx.tenantId, workspaceChatMessagesMatch.threadId, ctx.userId);
+        respondJson(res, 200, { messages });
+        return;
+      }
+
+      if (method === "POST" && workspaceChatMessagesMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const message = createChatMessage(state, tenant, {
+          threadId: workspaceChatMessagesMatch.threadId,
+          folderId: body.folderId,
+          parentMessageId: body.parentMessageId,
+          visibility: body.visibility,
+          privateRecipientUserId: body.privateRecipientUserId,
+          body: body.body,
+          attachments: body.attachments,
+          authorType: body.authorType ?? "user",
+          authorId: body.authorId ?? ctx.userId,
+          authorName: body.authorName ?? ctx.userId
+        }, ctx);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_message_created",
+          details: { threadId: workspaceChatMessagesMatch.threadId, messageId: message.id, visibility: message.visibility }
+        });
+        await persistState();
+        respondJson(res, 201, { message });
+        return;
+      }
+
+      const workspaceChatAiMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/messages/:messageId/ai");
+      if (method === "POST" && workspaceChatAiMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const message = createAiReplyForMessage(state, tenant, {
+          threadId: workspaceChatAiMatch.threadId,
+          messageId: workspaceChatAiMatch.messageId,
+          visibility: body.visibility,
+          responseText: body.responseText,
+          attachments: body.attachments
+        }, ctx);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_ai_reply_created",
+          details: {
+            threadId: workspaceChatAiMatch.threadId,
+            messageId: workspaceChatAiMatch.messageId,
+            aiMessageId: message.id,
+            visibility: message.visibility
+          }
+        });
+        await persistState();
+        respondJson(res, 201, { message });
+        return;
+      }
+
+      const workspaceChatRepliesMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/messages/:messageId/replies");
+      if (method === "GET" && workspaceChatRepliesMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const replies = listMessageReplies(
+          state,
+          ctx.tenantId,
+          workspaceChatRepliesMatch.threadId,
+          workspaceChatRepliesMatch.messageId,
+          ctx.userId
+        );
+        respondJson(res, 200, { replies });
+        return;
+      }
+
+      if (method === "POST" && workspaceChatRepliesMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const reply = createChatMessage(state, tenant, {
+          threadId: workspaceChatRepliesMatch.threadId,
+          parentMessageId: workspaceChatRepliesMatch.messageId,
+          visibility: body.visibility,
+          privateRecipientUserId: body.privateRecipientUserId,
+          body: body.body,
+          attachments: body.attachments,
+          authorType: body.authorType ?? "user",
+          authorId: body.authorId ?? ctx.userId,
+          authorName: body.authorName ?? ctx.userId
+        }, ctx);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_message_reply_created",
+          details: { threadId: workspaceChatRepliesMatch.threadId, parentMessageId: workspaceChatRepliesMatch.messageId, messageId: reply.id }
+        });
+        await persistState();
+        respondJson(res, 201, { reply });
+        return;
+      }
+
+      const workspaceMiniThreadMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/mini-threads/:parentMessageId");
+      if (method === "GET" && workspaceMiniThreadMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const miniThread = getMiniThread(
+          state,
+          ctx.tenantId,
+          workspaceMiniThreadMatch.threadId,
+          workspaceMiniThreadMatch.parentMessageId,
+          ctx.userId
+        );
+        respondJson(res, 200, { miniThread });
+        return;
+      }
+
+      const workspaceAttachmentsMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/attachments");
+      if (method === "GET" && workspaceAttachmentsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const attachments = listThreadAttachments(state, ctx.tenantId, workspaceAttachmentsMatch.threadId, ctx.userId);
+        respondJson(res, 200, { attachments });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/notifications") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const notifications = listNotifications(state, ctx.tenantId, ctx.userId);
+        respondJson(res, 200, { notifications });
+        return;
+      }
+
+      const workspaceNotificationReadMatch = pathMatcher(pathname, "/v1/workspace/notifications/:notificationId/read");
+      if (method === "POST" && workspaceNotificationReadMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const notification = markNotificationRead(state, ctx.tenantId, ctx.userId, workspaceNotificationReadMatch.notificationId);
+        await persistState();
+        respondJson(res, 200, { notification });
         return;
       }
 
@@ -655,6 +940,125 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         });
         await persistState();
         respondJson(res, 201, { comment });
+        return;
+      }
+
+      const folderAutomationsMatch = pathMatcher(pathname, "/v1/automations/folders/:folderId");
+      if (method === "GET" && folderAutomationsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        requireWorkspaceFolder(state, tenant.id, folderAutomationsMatch.folderId);
+        const automations = listFolderAutomations(state, tenant.id, folderAutomationsMatch.folderId);
+        respondJson(res, 200, { automations });
+        return;
+      }
+
+      if (method === "POST" && folderAutomationsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const automation = createFolderAutomation(state, tenant, folderAutomationsMatch.folderId, body);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "folder_automation_created",
+          details: { automationId: automation.id, folderId: folderAutomationsMatch.folderId, triggerType: automation.triggerType }
+        });
+        await persistState();
+        respondJson(res, 201, { automation });
+        return;
+      }
+
+      const automationPatchMatch = pathMatcher(pathname, "/v1/automations/:automationId");
+      if (method === "PATCH" && automationPatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const automation = patchFolderAutomation(state, ctx.tenantId, automationPatchMatch.automationId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "folder_automation_updated",
+          details: { automationId: automation.id, enabled: automation.enabled }
+        });
+        await persistState();
+        respondJson(res, 200, { automation });
+        return;
+      }
+
+      const automationRunMatch = pathMatcher(pathname, "/v1/automations/:automationId/run");
+      if (method === "POST" && automationRunMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const body = await parseJsonBody(req);
+        const run = runFolderAutomation(state, tenant, automationRunMatch.automationId, {
+          runSkillPack,
+          runModelTask,
+          generateReport,
+          createAgentJob: (localState, localTenant, payload) => createAgentJob(localState, localTenant, payload, {
+            requireWorkspaceFolder,
+            requireWorkspaceThread,
+            createThreadComment,
+            runSkillPack,
+            runModelTask,
+            generateReport
+          }),
+          createDeviceCommandRequest: (localState, localTenant, payload) => createDeviceCommandRequest(localState, localTenant, payload, {
+            requireWorkspaceFolder,
+            requireWorkspaceThread
+          })
+        }, {
+          actionType: body.actionType,
+          actionPayload: body.actionPayload,
+          targetThreadId: body.targetThreadId
+        });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "folder_automation_run",
+          details: { automationId: automationRunMatch.automationId, runId: run.id, status: run.status }
+        });
+        await persistState();
+        respondJson(res, 200, { run });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/automations/runs") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const runs = listAutomationRuns(state, ctx.tenantId);
+        respondJson(res, 200, { runs });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/automations/heartbeat/validate") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const result = validateHeartbeatContent(body.content ?? "");
+        respondJson(res, 200, result);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/automations/heartbeat/parse") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const result = parseHeartbeatContent(body.content ?? "");
+        respondJson(res, 200, result);
         return;
       }
 
@@ -1606,6 +2010,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
     demoTenant,
     close: () => {
       stopScheduler();
+      if (automationTimer) clearInterval(automationTimer);
     }
   };
 }

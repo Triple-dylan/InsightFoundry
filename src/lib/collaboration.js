@@ -1,4 +1,5 @@
 import { newId } from "./state.js";
+import { createChatMessage } from "./workspace-core.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -141,6 +142,21 @@ export function requireWorkspaceThread(state, tenantId, threadId) {
 
 export function listThreadComments(state, tenantId, threadId) {
   requireWorkspaceThread(state, tenantId, threadId);
+  const mapped = state.chatMessages
+    .filter((item) => item.tenantId === tenantId && item.threadId === threadId)
+    .filter((item) => item.visibility === "shared")
+    .sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1))
+    .map((item) => ({
+      id: item.id,
+      tenantId: item.tenantId,
+      threadId: item.threadId,
+      authorId: item.authorId,
+      authorName: item.authorName,
+      role: item.authorType === "agent" ? "assistant" : "comment",
+      body: item.body,
+      createdAt: item.createdAt
+    }));
+  if (mapped.length) return mapped;
   return state.workspaceComments
     .filter((item) => item.tenantId === tenantId && item.threadId === threadId)
     .sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1));
@@ -153,19 +169,27 @@ export function createThreadComment(state, tenant, payload = {}) {
     throw err;
   }
   const thread = requireWorkspaceThread(state, tenant.id, payload.threadId);
+  const authorType = payload.role === "assistant" ? "agent" : "user";
+  const message = createChatMessage(state, tenant, {
+    threadId: thread.id,
+    folderId: thread.folderId,
+    authorType,
+    authorId: payload.authorId ?? "system",
+    authorName: payload.authorName ?? "System",
+    visibility: "shared",
+    body: payload.body
+  }, { userId: payload.authorId ?? "system" });
   const comment = {
     id: newId("workspace_comment"),
     tenantId: tenant.id,
     threadId: thread.id,
-    authorId: payload.authorId ?? "system",
-    authorName: payload.authorName ?? "System",
+    authorId: message.authorId,
+    authorName: message.authorName,
     role: payload.role ?? "comment",
-    body: payload.body,
-    createdAt: nowIso()
+    body: message.body,
+    createdAt: message.createdAt
   };
   state.workspaceComments.push(comment);
-  thread.lastMessageAt = comment.createdAt;
-  thread.updatedAt = nowIso();
   return comment;
 }
 

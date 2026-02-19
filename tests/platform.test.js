@@ -957,3 +957,252 @@ test("quick add integrations connects source, channels, and mcp in settings flow
     await ctx.stop();
   }
 });
+
+test("workspace chat v2 supports shared/private ai and mini-thread behavior", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Chat V2 Co");
+
+    const addMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Other User",
+        email: "other.user@example.com",
+        role: "analyst"
+      })
+    });
+    assert.equal(addMemberRes.status, 201);
+    const memberId = (await addMemberRes.json()).member.id;
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const messageRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        body: "@other.user please review this deal desk update",
+        visibility: "shared",
+        authorName: "tester"
+      })
+    });
+    assert.equal(messageRes.status, 201);
+    const messageId = (await messageRes.json()).message.id;
+
+    const aiSharedRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${messageId}/ai`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ visibility: "shared", responseText: "Shared AI response" })
+    });
+    assert.equal(aiSharedRes.status, 201);
+
+    const aiPrivateRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${messageId}/ai`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ visibility: "private", responseText: "Private AI response body" })
+    });
+    assert.equal(aiPrivateRes.status, 201);
+
+    const reply1Res = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${messageId}/replies`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ body: "reply one", visibility: "shared" })
+    });
+    assert.equal(reply1Res.status, 201);
+    const reply2Res = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${messageId}/replies`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ body: "reply two", visibility: "shared" })
+    });
+    assert.equal(reply2Res.status, 201);
+
+    const miniThreadRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/mini-threads/${messageId}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(miniThreadRes.status, 200);
+    const miniThread = (await miniThreadRes.json()).miniThread;
+    assert.equal(miniThread.mode, "mini-thread");
+    assert.ok(miniThread.replies.length >= 2);
+
+    const repliesAsOtherRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${messageId}/replies`, {
+      headers: {
+        ...tenantHeaders(tenant.id, "analyst"),
+        "x-user-id": "other-user"
+      }
+    });
+    assert.equal(repliesAsOtherRes.status, 200);
+    const repliesAsOther = (await repliesAsOtherRes.json()).replies;
+    assert.ok(repliesAsOther.some((reply) => reply.privateHidden === true));
+
+    const notificationsRes = await fetch(`${ctx.baseUrl}/v1/workspace/notifications`, {
+      headers: {
+        ...tenantHeaders(tenant.id, "analyst"),
+        "x-user-id": memberId
+      }
+    });
+    assert.equal(notificationsRes.status, 200);
+    const notifications = (await notificationsRes.json()).notifications;
+    assert.ok(notifications.some((item) => item.kind === "mention"));
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("workspace agent settings and member appearance are configurable", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Workspace Agent Co");
+
+    const getAgentRes = await fetch(`${ctx.baseUrl}/v1/settings/workspace-agent`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(getAgentRes.status, 200);
+    const getAgentBody = await getAgentRes.json();
+    assert.equal(getAgentBody.profile.name, "InsightFoundry Agent");
+
+    const patchAgentRes = await fetch(`${ctx.baseUrl}/v1/settings/workspace-agent`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Foundry",
+        tonePreset: "analyst",
+        avatarStyle: "badge"
+      })
+    });
+    assert.equal(patchAgentRes.status, 200);
+    const patchAgentBody = await patchAgentRes.json();
+    assert.equal(patchAgentBody.profile.name, "Foundry");
+    assert.equal(patchAgentBody.profile.tonePreset, "analyst");
+
+    const memberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Color User",
+        email: "color.user@example.com",
+        role: "analyst"
+      })
+    });
+    assert.equal(memberRes.status, 201);
+    const memberId = (await memberRes.json()).member.id;
+
+    const patchAppearanceRes = await fetch(`${ctx.baseUrl}/v1/settings/team/${memberId}/appearance`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        colorMode: "manual",
+        colorHex: "#112233"
+      })
+    });
+    assert.equal(patchAppearanceRes.status, 200);
+    const patchAppearanceBody = await patchAppearanceRes.json();
+    assert.equal(patchAppearanceBody.appearance.colorMode, "manual");
+    assert.equal(patchAppearanceBody.appearance.colorHex, "#112233");
+
+    const teamRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(teamRes.status, 200);
+    const teamBody = await teamRes.json();
+    assert.ok(teamBody.appearance.some((item) => item.memberId === memberId && item.colorHex === "#112233"));
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("folder automations support heartbeat parse/validate and manual run", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Automation Co");
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const heartbeatContent = `---
+enabled: true
+intervalMinutes: 5
+targetThreadId: ${threadId}
+triggers:
+  - id: approvals_waiting
+    when: pending_approvals_count() >= 0
+    action: run_agent_job
+    cooldownMinutes: 1
+---
+Heartbeat automation`;
+
+    const parseRes = await fetch(`${ctx.baseUrl}/v1/automations/heartbeat/parse`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ content: heartbeatContent })
+    });
+    assert.equal(parseRes.status, 200);
+    const parseBody = await parseRes.json();
+    assert.equal(parseBody.errors.length, 0);
+    assert.equal(parseBody.config.targetThreadId, threadId);
+
+    const validateRes = await fetch(`${ctx.baseUrl}/v1/automations/heartbeat/validate`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ content: heartbeatContent })
+    });
+    assert.equal(validateRes.status, 200);
+    const validateBody = await validateRes.json();
+    assert.equal(validateBody.ok, true);
+
+    const createAutomationRes = await fetch(`${ctx.baseUrl}/v1/automations/folders/${folderId}`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Deal Desk Heartbeat",
+        triggerType: "heartbeat",
+        heartbeatContent,
+        actionType: "run_agent_job",
+        actionPayload: {
+          jobType: "cowork_thread",
+          input: "Heartbeat run summary."
+        },
+        targetThreadId: threadId
+      })
+    });
+    assert.equal(createAutomationRes.status, 201);
+    const automationId = (await createAutomationRes.json()).automation.id;
+
+    const runRes = await fetch(`${ctx.baseUrl}/v1/automations/${automationId}/run`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({})
+    });
+    assert.equal(runRes.status, 200);
+    const runBody = await runRes.json();
+    assert.equal(runBody.run.status, "completed");
+
+    const runsRes = await fetch(`${ctx.baseUrl}/v1/automations/runs`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(runsRes.status, 200);
+    const runsBody = await runsRes.json();
+    assert.ok(runsBody.runs.some((run) => run.automationId === automationId));
+
+    const messagesRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json();
+    assert.ok(messagesBody.messages.some((message) => /Automation 'Deal Desk Heartbeat' completed/i.test(message.body)));
+  } finally {
+    await ctx.stop();
+  }
+});

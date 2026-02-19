@@ -517,15 +517,15 @@
         backdrop-filter: blur(var(--glass-blur));
       }
       .workspace.codex-layout {
-        grid-template-columns: 240px minmax(0, 1fr) 360px;
+        grid-template-columns: 280px minmax(0, 1fr) 380px;
         gap: 12px;
         transition: grid-template-columns 180ms ease;
       }
       .workspace.codex-layout.left-collapsed {
-        grid-template-columns: minmax(0, 1fr) 360px;
+        grid-template-columns: minmax(0, 1fr) 380px;
       }
       .workspace.codex-layout.right-collapsed {
-        grid-template-columns: 240px minmax(0, 1fr);
+        grid-template-columns: 280px minmax(0, 1fr);
       }
       .workspace.codex-layout.left-collapsed.right-collapsed {
         grid-template-columns: minmax(0, 1fr);
@@ -552,7 +552,7 @@
         padding: 12px;
       }
       .workspace.codex-layout .center {
-        grid-template-rows: auto auto 1fr;
+        grid-template-rows: auto auto auto 1fr;
         gap: 10px;
       }
       .workspace.codex-layout .doc-header {
@@ -578,7 +578,7 @@
         font-family: "Sora", sans-serif;
       }
       .workspace.codex-layout .chat {
-        min-height: 58vh;
+        min-height: 66vh;
         border-color: var(--line);
       }
       .workspace.codex-layout .thread {
@@ -592,11 +592,35 @@
         background: rgba(222, 245, 240, 0.9);
         border-color: rgba(92, 155, 139, 0.38);
       }
+      .workspace.codex-layout .msg.private-hidden {
+        background: rgba(243, 244, 246, 0.95);
+        border-style: dashed;
+      }
+      .workspace.codex-layout .msg.reply {
+        margin-left: 18px;
+        border-left-width: 3px;
+      }
+      .workspace.codex-layout .msg .reply-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
       .workspace.codex-layout .composer {
         background: rgba(255, 255, 255, 0.62);
       }
+      .workspace.codex-layout .composer {
+        grid-template-columns: 1fr;
+      }
+      .workspace.codex-layout .composer .toolbar {
+        margin: 0;
+      }
       .workspace.codex-layout .composer textarea {
         min-height: 56px;
+      }
+      #miniThreadDrawer {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.8);
       }
       .workspace.codex-layout .right-rail .stepper {
         gap: 10px;
@@ -674,17 +698,18 @@
           <div class="workspace codex-layout">
             <aside class="left-rail panel">
               <div class="card">
-                <h3>Folders</h3>
-                <div class="subtle">Shared workspace folders</div>
+                <h3>Projects</h3>
+                <div class="subtle">Folders and shared threads</div>
+                <div class="toolbar" style="margin-top:8px">
+                  <button id="leftNewThreadBtn" type="button" class="primary">New Thread</button>
+                  <button id="leftNewSkillBtn" type="button">New Skill</button>
+                  <button id="leftNewAutomationBtn" type="button">New Automation</button>
+                </div>
                 <div class="toolbar" style="margin-top:8px">
                   <input id="newFolderNameInput" placeholder="New folder name" />
                   <button id="newFolderBtn" type="button">Create</button>
                 </div>
                 <div id="folderList" class="list" style="margin-top:8px"></div>
-              </div>
-              <div class="card">
-                <h3>Threads</h3>
-                <div class="subtle">Shared chat feeds inside selected folder</div>
                 <div class="toolbar" style="margin-top:8px">
                   <input id="newThreadTitleInput" placeholder="New thread title" />
                   <button id="newThreadBtn" type="button">Create</button>
@@ -692,33 +717,42 @@
                 <div id="threadList" class="list" style="margin-top:8px"></div>
               </div>
               <div class="card">
-                <h3>Prompt Library</h3>
-                <div class="list" id="savedPromptList"></div>
+                <h3>Skills</h3>
+                <div class="subtle">Installed and active skill packs</div>
+                <div id="sidebarSkillsList" class="list" style="margin-top:8px"></div>
+              </div>
+              <div class="card">
+                <h3>Automations</h3>
+                <div class="subtle">Folder-scoped jobs and heartbeat triggers</div>
+                <div id="sidebarAutomationsList" class="list" style="margin-top:8px"></div>
                 <div id="runContextList" hidden></div>
+              </div>
+              <div class="card">
+                <h3>Prompt Seeds</h3>
+                <div class="list" id="savedPromptList"></div>
               </div>
             </aside>
 
             <section class="center panel">
               <div class="card doc-header">
-                <div class="subtle mono">Workspace / Shared Copilot</div>
-                <h2 style="margin:4px 0 2px">Shared Data Thread</h2>
-                <div class="subtle">Chat-first analysis workspace with foldered threads, comments, and run-aware context.</div>
+                <div class="subtle mono">Workspace / Team Feed</div>
+                <h2 style="margin:4px 0 2px">Collaborative AI Copilot</h2>
+                <div class="subtle">Shared by default. Ask privately when needed. Mini-threads keep the main feed clean.</div>
               </div>
               <div class="commandbar">
                 <form id="commandForm" class="command-line">
                   <kbd>cmd+k</kbd>
-                  <input id="commandInput" placeholder="new run | execute run | open settings channels | open settings team" />
+                  <input id="commandInput" placeholder="new thread | new run | execute run | open settings team/channels/models" />
                   <button type="submit">Run</button>
                 </form>
                 <div class="toolbar">
-                  <button id="quickNewRunBtn" type="button" class="primary">New Run</button>
+                  <button id="quickNewRunBtn" type="button">New Run</button>
                   <button id="quickExecuteBtn" type="button">Execute</button>
                   <button id="quickDeliverBtn" type="button">Deliver</button>
                   <button id="quickSettingsBtn" type="button">Settings</button>
                 </div>
               </div>
               <div class="card" id="dataContextStrip"></div>
-              <div class="kpis" id="kpiGrid" hidden></div>
               <section class="chat">
                 <div class="chat-toolbar">
                   <label class="subtle">Model</label>
@@ -728,9 +762,24 @@
                 </div>
                 <div class="toolbar" id="chatQuickActionBar" style="padding:8px 10px; border-bottom:1px solid var(--line);"></div>
                 <div class="thread" id="thread"></div>
+                <aside id="miniThreadDrawer" class="card" style="margin:8px 10px 0; display:none;">
+                  <div class="toolbar" style="justify-content:space-between">
+                    <strong id="miniThreadTitle">Mini Thread</strong>
+                    <button id="closeMiniThreadBtn" type="button">Close</button>
+                  </div>
+                  <div id="miniThreadList" class="list" style="margin-top:8px; max-height:180px; overflow:auto;"></div>
+                  <div class="toolbar" style="margin-top:8px">
+                    <input id="miniThreadReplyInput" placeholder="Reply in mini-thread" />
+                    <button id="miniThreadReplyBtn" type="button" class="primary">Reply</button>
+                  </div>
+                </aside>
                 <div class="attachment-tray" id="chatAttachments"></div>
                 <form id="chatForm" class="composer">
-                  <button type="button" id="attachFilesBtn">Attach</button>
+                  <div class="toolbar">
+                    <button type="button" id="attachFilesBtn">Attach</button>
+                    <button type="button" id="askAiSharedBtn">Ask AI</button>
+                    <button type="button" id="askAiPrivateBtn">Ask AI Privately</button>
+                  </div>
                   <textarea id="chatInput" placeholder="Ask for a revenue forecast, anomaly scan, root-cause breakdown, or action plan from current run context"></textarea>
                   <input id="chatFileInput" type="file" multiple hidden />
                   <button type="submit" class="primary">Send</button>
@@ -740,13 +789,16 @@
 
             <aside class="right-rail panel">
               <div class="card">
-                <h4>Run Health</h4>
+                <div class="tabs">
+                  <button id="rightRailTabWorking" class="tab active" type="button">Working Folders</button>
+                  <button id="rightRailTabAttachments" class="tab" type="button">Attachments</button>
+                  <button id="rightRailTabNotifications" class="tab" type="button">Notifications</button>
+                </div>
+              </div>
+              <div id="rightRailWorkingPanel" class="card">
+                <h4>Run + Agent Controls</h4>
                 <div class="badges" id="runHealthBadges"></div>
                 <div id="onboardingChecklist" class="onboard" style="margin-top:8px"></div>
-              </div>
-              <div class="card">
-                <h4>Agent Cowork</h4>
-                <div class="subtle">Run folder-scoped agent tasks and request device commands with approval.</div>
                 <div class="form-grid" style="margin-top:8px">
                   <label class="full">Cowork Prompt<input id="agentCoworkPrompt" placeholder="Summarize this thread and propose next steps." /></label>
                   <button id="runCoworkAgentBtn" type="button">Run In Thread</button>
@@ -756,32 +808,42 @@
                   <label>Args<input id="deviceCommandArgsInput" placeholder="-la" /></label>
                   <button id="requestDeviceCommandBtn" type="button">Request Command</button>
                 </div>
-              </div>
-              <div class="card stepper run-builder-compact">
-                <h3>Run Setup</h3>
-                <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
-                <div class="step">2. Model Profile: <select id="runModelSelect"></select></div>
-                <div class="step">3. Report Type: <select id="runReportSelect"></select></div>
-                <div class="step">4. Skill (optional): <select id="runSkillSelect"></select></div>
-                <div class="step">5. Channels: <input id="runChannelsInput" value="email,slack" /></div>
-                <div class="toolbar">
-                  <button id="createRunBtn" type="button" class="primary">Create Draft</button>
-                  <button id="executeRunBtn" type="button">Execute</button>
-                  <button id="deliverRunBtn" type="button">Deliver</button>
-                  <button id="previewRunBtn" type="button">Preview</button>
-                </div>
-                <div class="preview-grid">
-                  <div class="preview-panel">
-                    <h4>Report Preview</h4>
-                    <pre id="runReportPreview" class="mono">Select a report type, then click Preview.</pre>
+                <div class="stepper run-builder-compact" style="margin-top:8px">
+                  <div class="step">1. Source Dataset: <select id="runSourceSelect"></select></div>
+                  <div class="step">2. Model Profile: <select id="runModelSelect"></select></div>
+                  <div class="step">3. Report Type: <select id="runReportSelect"></select></div>
+                  <div class="step">4. Skill (optional): <select id="runSkillSelect"></select></div>
+                  <div class="step">5. Channels: <input id="runChannelsInput" value="email,slack" /></div>
+                  <div class="toolbar">
+                    <button id="createRunBtn" type="button" class="primary">Create Draft</button>
+                    <button id="executeRunBtn" type="button">Execute</button>
+                    <button id="deliverRunBtn" type="button">Deliver</button>
+                    <button id="previewRunBtn" type="button">Preview</button>
                   </div>
-                  <div class="preview-panel">
-                    <h4>Channel Preview</h4>
-                    <pre id="runChannelPreview" class="mono">Delivery summary appears here before execute/deliver.</pre>
+                  <div class="preview-grid">
+                    <div class="preview-panel">
+                      <h4>Report Preview</h4>
+                      <pre id="runReportPreview" class="mono">Select a report type, then click Preview.</pre>
+                    </div>
+                    <div class="preview-panel">
+                      <h4>Channel Preview</h4>
+                      <pre id="runChannelPreview" class="mono">Delivery summary appears here before execute/deliver.</pre>
+                    </div>
                   </div>
                 </div>
               </div>
-              <div class="tabs card">
+
+              <div id="rightRailAttachmentsPanel" class="card" style="display:none;">
+                <h4>Attachments</h4>
+                <div id="rightAttachmentsList" class="list"></div>
+              </div>
+
+              <div id="rightRailNotificationsPanel" class="card" style="display:none;">
+                <h4>Notifications</h4>
+                <div id="rightNotificationsList" class="list"></div>
+              </div>
+
+              <div class="tabs card" id="contextTabsCard">
                 <button class="tab active" data-context-tab="summary">Summary</button>
                 <button class="tab" data-context-tab="evidence">Evidence</button>
                 <button class="tab" data-context-tab="actions">Actions</button>
@@ -867,7 +929,15 @@
         team: [],
         folders: [],
         threads: [],
-        commentsByThread: {},
+        messagesByThread: {},
+        repliesByMessage: {},
+        threadAttachmentsByThread: {},
+        notifications: [],
+        folderAutomations: [],
+        workspaceAgentProfile: null,
+        teamAppearanceByMember: {},
+        activeRightRailTab: "working",
+        miniThreadParentMessageId: null,
         activeFolderId: null,
         activeThreadId: null,
         pendingAttachments: [],
@@ -972,7 +1042,7 @@
         div.className = `msg ${role}`;
         const meta = document.createElement("span");
         meta.className = "msg-meta";
-        meta.textContent = role === "user" ? "You" : "InsightFoundry";
+        meta.textContent = role === "user" ? "You" : (appState.workspaceAgentProfile?.name || "InsightFoundry Agent");
         const body = document.createElement("div");
         body.textContent = text;
         div.appendChild(meta);
@@ -1042,6 +1112,31 @@
         return appState.threads.find((item) => item.id === appState.activeThreadId) || null;
       }
 
+      function escapeHtml(input) {
+        return String(input ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function teamColorForMember(memberId) {
+        if (!memberId) return "#0f766e";
+        const explicit = appState.teamAppearanceByMember[memberId];
+        if (explicit?.colorHex) return explicit.colorHex;
+        let hash = 0;
+        for (let i = 0; i < memberId.length; i += 1) hash = (hash * 31 + memberId.charCodeAt(i)) >>> 0;
+        const palette = ["#0f766e", "#0b57d0", "#a61e4d", "#7c2d12", "#3f6212", "#5b21b6"];
+        return palette[hash % palette.length];
+      }
+
+      function messagesForThread(threadId) {
+        return appState.messagesByThread[threadId] || [];
+      }
+
+      function repliesForMessage(messageId) {
+        return appState.repliesByMessage?.[messageId] || [];
+      }
+
       function renderFolderList() {
         const box = document.getElementById("folderList");
         box.innerHTML = "";
@@ -1052,17 +1147,27 @@
         appState.folders.forEach((folder) => {
           const button = document.createElement("button");
           button.className = `item clickable ${folder.id === appState.activeFolderId ? "active" : ""}`;
-          button.innerHTML = `<div><strong>${folder.name}</strong></div><div class="subtle">${folder.description || ""}</div>`;
+          const unread = appState.notifications
+            .filter((item) => !item.read && item.folderId === folder.id)
+            .length;
+          button.innerHTML = `
+            <div><strong>${folder.name}</strong> ${unread ? `<span class="status mono">${unread} unread</span>` : ""}</div>
+            <div class="subtle">${folder.description || ""}</div>
+          `;
           button.onclick = async () => {
             appState.activeFolderId = folder.id;
             const threadIds = appState.threads.filter((item) => item.folderId === folder.id).map((item) => item.id);
             if (!threadIds.includes(appState.activeThreadId)) {
               appState.activeThreadId = threadIds[0] || null;
             }
-            await refreshThreadComments();
+            appState.miniThreadParentMessageId = null;
+            await refreshThreadMessages();
+            await refreshFolderAutomations();
             renderFolderList();
+            renderSidebarAutomations();
             renderThreadList();
             renderSharedThread();
+            renderRightRail();
             renderContextPanel();
           };
           box.appendChild(button);
@@ -1080,20 +1185,52 @@
         folderThreads.forEach((thread) => {
           const button = document.createElement("button");
           button.className = `item clickable ${thread.id === appState.activeThreadId ? "active" : ""}`;
-          const count = (appState.commentsByThread[thread.id] || []).length;
+          const count = messagesForThread(thread.id).length;
+          const unread = appState.notifications.filter((item) => !item.read && item.threadId === thread.id).length;
           button.innerHTML = `
             <div><strong>${thread.title}</strong></div>
-            <div class="subtle">${count} comments${thread.lastMessageAt ? ` • ${new Date(thread.lastMessageAt).toLocaleString()}` : ""}</div>
+            <div class="subtle">${count} messages${unread ? ` • ${unread} unread` : ""}${thread.lastMessageAt ? ` • ${new Date(thread.lastMessageAt).toLocaleString()}` : ""}</div>
           `;
           button.onclick = async () => {
             appState.activeThreadId = thread.id;
-            await refreshThreadComments();
+            appState.miniThreadParentMessageId = null;
+            await refreshThreadMessages();
             renderThreadList();
             renderSharedThread();
+            renderRightRail();
             renderContextPanel();
           };
           box.appendChild(button);
         });
+      }
+
+      function renderMiniThreadDrawer() {
+        const drawer = document.getElementById("miniThreadDrawer");
+        const list = document.getElementById("miniThreadList");
+        const parentId = appState.miniThreadParentMessageId;
+        if (!drawer || !list) return;
+        if (!parentId) {
+          drawer.style.display = "none";
+          return;
+        }
+        const thread = currentThread();
+        if (!thread) {
+          drawer.style.display = "none";
+          return;
+        }
+        const parent = messagesForThread(thread.id).find((message) => message.id === parentId)
+          || Object.values(appState.repliesByMessage || {}).flat().find((message) => message.id === parentId);
+        const replies = repliesForMessage(parentId);
+        drawer.style.display = "block";
+        document.getElementById("miniThreadTitle").textContent = parent ? `Mini Thread: ${parent.authorName}` : "Mini Thread";
+        list.innerHTML = replies.length
+          ? replies.map((reply) => `
+              <div class="item">
+                <div><strong style="color:${teamColorForMember(reply.authorId)}">${escapeHtml(reply.authorName)}</strong> <span class="subtle">${new Date(reply.createdAt).toLocaleString()}</span></div>
+                <div>${escapeHtml(reply.body)}</div>
+              </div>
+            `).join("")
+          : `<div class="item">No replies yet.</div>`;
       }
 
       function renderSharedThread() {
@@ -1102,20 +1239,104 @@
         const thread = currentThread();
         if (!thread) {
           threadEl.innerHTML = `<div class="item">Select a thread or create one from the left rail.</div>`;
+          renderMiniThreadDrawer();
           return;
         }
-        const comments = appState.commentsByThread[thread.id] || [];
-        if (!comments.length) {
+        const messages = messagesForThread(thread.id);
+        if (!messages.length) {
           threadEl.innerHTML = `<div class="item">No messages yet in "${thread.title}".</div>`;
+          renderMiniThreadDrawer();
           return;
         }
-        threadEl.innerHTML = comments.map((comment) => `
-          <div class="msg ${comment.role === "user" ? "user" : "ai"}">
-            <span class="msg-meta">${comment.authorName} • ${new Date(comment.createdAt).toLocaleString()}</span>
-            <div>${comment.body}</div>
+        threadEl.innerHTML = messages.map((message) => {
+          const replyCount = Number(message.replyCount ?? 0);
+          const inlineReplies = repliesForMessage(message.id);
+          const roleClass = message.authorType === "user" ? "user" : "ai";
+          const visibility = message.visibility === "private" ? "private" : "shared";
+          const visibilityText = visibility === "private" ? "private" : "shared";
+          const badges = `<span class="status mono">${visibilityText}</span>${replyCount ? `<span class="status mono">${replyCount} replies</span>` : ""}`;
+          const body = escapeHtml(message.body);
+          const inlineBlock = inlineReplies.length === 1
+            ? `
+              <div class="msg reply ${inlineReplies[0].privateHidden ? "private-hidden" : ""}">
+                <span class="msg-meta"><strong style="color:${teamColorForMember(inlineReplies[0].authorId)}">${escapeHtml(inlineReplies[0].authorName)}</strong> • ${new Date(inlineReplies[0].createdAt).toLocaleString()}</span>
+                <div>${escapeHtml(inlineReplies[0].body)}</div>
+              </div>
+            `
+            : "";
+          const miniThreadAction = replyCount > 1
+            ? `<button type="button" data-open-mini-thread="${message.id}">Open Mini Thread</button>`
+            : "";
+          return `
+            <div class="msg ${roleClass} ${message.privateHidden ? "private-hidden" : ""}">
+              <span class="msg-meta"><strong style="color:${teamColorForMember(message.authorId)}">${escapeHtml(message.authorName)}</strong> • ${new Date(message.createdAt).toLocaleString()} ${badges}</span>
+              <div>${body}</div>
+              ${inlineBlock}
+              <div class="reply-actions">
+                <button type="button" data-reply-message="${message.id}">Reply</button>
+                ${miniThreadAction}
+                <button type="button" data-ask-ai-shared="${message.id}">Ask AI</button>
+                <button type="button" data-ask-ai-private="${message.id}">Ask AI Privately</button>
+              </div>
+            </div>
+          `;
+        }).join("");
+        threadEl.scrollTop = threadEl.scrollHeight;
+
+        threadEl.querySelectorAll("[data-open-mini-thread]").forEach((btn) => {
+          btn.onclick = () => {
+            appState.miniThreadParentMessageId = btn.dataset.openMiniThread;
+            renderMiniThreadDrawer();
+          };
+        });
+        threadEl.querySelectorAll("[data-reply-message]").forEach((btn) => {
+          btn.onclick = () => {
+            appState.miniThreadParentMessageId = btn.dataset.replyMessage;
+            renderMiniThreadDrawer();
+            document.getElementById("miniThreadReplyInput")?.focus();
+          };
+        });
+        threadEl.querySelectorAll("[data-ask-ai-shared]").forEach((btn) => {
+          btn.onclick = async () => {
+            await askAiForMessage(btn.dataset.askAiShared, "shared");
+          };
+        });
+        threadEl.querySelectorAll("[data-ask-ai-private]").forEach((btn) => {
+          btn.onclick = async () => {
+            await askAiForMessage(btn.dataset.askAiPrivate, "private");
+          };
+        });
+        renderMiniThreadDrawer();
+      }
+
+      function renderSidebarSkills() {
+        const list = document.getElementById("sidebarSkillsList");
+        if (!list) return;
+        if (!appState.skillsInstalled.length) {
+          list.innerHTML = `<div class="item">No skills installed.</div>`;
+          return;
+        }
+        list.innerHTML = appState.skillsInstalled.slice(0, 10).map((skill) => `
+          <div class="item">
+            <div><strong>${escapeHtml(skill.manifest?.name || skill.id)}</strong> ${skill.active ? "<span class='status mono'>active</span>" : ""}</div>
+            <div class="subtle mono">${escapeHtml(skill.id)}</div>
           </div>
         `).join("");
-        threadEl.scrollTop = threadEl.scrollHeight;
+      }
+
+      function renderSidebarAutomations() {
+        const list = document.getElementById("sidebarAutomationsList");
+        if (!list) return;
+        if (!appState.folderAutomations.length) {
+          list.innerHTML = `<div class="item">No automations in this folder.</div>`;
+          return;
+        }
+        list.innerHTML = appState.folderAutomations.map((automation) => `
+          <div class="item">
+            <div><strong>${escapeHtml(automation.name)}</strong> <span class="status mono">${automation.triggerType}</span></div>
+            <div class="subtle">${automation.enabled ? "enabled" : "disabled"} • ${automation.actionType}</div>
+          </div>
+        `).join("");
       }
 
       function renderChatModelSelect() {
@@ -1162,6 +1383,77 @@
             document.getElementById("chatInput").focus();
           };
         });
+      }
+
+      function setRightRailTab(tab) {
+        appState.activeRightRailTab = tab;
+        const workingBtn = document.getElementById("rightRailTabWorking");
+        const attachmentsBtn = document.getElementById("rightRailTabAttachments");
+        const notificationsBtn = document.getElementById("rightRailTabNotifications");
+        if (workingBtn) workingBtn.classList.toggle("active", tab === "working");
+        if (attachmentsBtn) attachmentsBtn.classList.toggle("active", tab === "attachments");
+        if (notificationsBtn) notificationsBtn.classList.toggle("active", tab === "notifications");
+        const workingPanel = document.getElementById("rightRailWorkingPanel");
+        const attachmentsPanel = document.getElementById("rightRailAttachmentsPanel");
+        const notificationsPanel = document.getElementById("rightRailNotificationsPanel");
+        const contextTabs = document.getElementById("contextTabsCard");
+        const contextBody = document.getElementById("contextBody");
+        if (workingPanel) workingPanel.style.display = tab === "working" ? "block" : "none";
+        if (attachmentsPanel) attachmentsPanel.style.display = tab === "attachments" ? "block" : "none";
+        if (notificationsPanel) notificationsPanel.style.display = tab === "notifications" ? "block" : "none";
+        if (contextTabs) contextTabs.style.display = tab === "working" ? "flex" : "none";
+        if (contextBody) contextBody.style.display = tab === "working" ? "block" : "none";
+      }
+
+      function renderRightAttachments() {
+        const list = document.getElementById("rightAttachmentsList");
+        if (!list) return;
+        const threadId = appState.activeThreadId;
+        const attachments = threadId ? (appState.threadAttachmentsByThread[threadId] || []) : [];
+        if (!attachments.length) {
+          list.innerHTML = `<div class="item">No files or screenshots yet.</div>`;
+          return;
+        }
+        list.innerHTML = attachments.map((attachment) => `
+          <div class="item">
+            <div><strong>${escapeHtml(attachment.name)}</strong></div>
+            <div class="subtle">${attachment.type || "file"} • ${Math.max(1, Math.round((attachment.size || 0) / 1024))} KB</div>
+            <div class="subtle">from ${escapeHtml(attachment.authorName || "unknown")} • ${new Date(attachment.createdAt).toLocaleString()}</div>
+          </div>
+        `).join("");
+      }
+
+      function renderRightNotifications() {
+        const list = document.getElementById("rightNotificationsList");
+        if (!list) return;
+        if (!appState.notifications.length) {
+          list.innerHTML = `<div class="item">No notifications.</div>`;
+          return;
+        }
+        list.innerHTML = appState.notifications.slice(0, 40).map((notification) => `
+          <div class="item">
+            <div><strong>${escapeHtml(notification.title)}</strong> ${notification.read ? "" : "<span class='status mono'>new</span>"}</div>
+            <div class="subtle">${notification.kind} • ${new Date(notification.createdAt).toLocaleString()}</div>
+            <div class="toolbar" style="margin-top:6px">
+              ${notification.read ? "" : `<button type="button" data-mark-notification-read="${notification.id}">Mark Read</button>`}
+            </div>
+          </div>
+        `).join("");
+        list.querySelectorAll("[data-mark-notification-read]").forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/v1/workspace/notifications/${encodeURIComponent(btn.dataset.markNotificationRead)}/read`, {
+              method: "POST"
+            });
+            await loadAll();
+            setRightRailTab("notifications");
+          };
+        });
+      }
+
+      function renderRightRail() {
+        renderRightAttachments();
+        renderRightNotifications();
+        setRightRailTab(appState.activeRightRailTab || "working");
       }
 
       async function applyStarterPack() {
@@ -1278,6 +1570,7 @@
 
       function renderKPIs() {
         const grid = document.getElementById("kpiGrid");
+        if (!grid) return;
         grid.innerHTML = "";
         ["revenue", "profit", "spend"].forEach((metric) => {
           const value = appState.metrics[metric] || 0;
@@ -1314,6 +1607,8 @@
             <div class="context-kv"><div class="subtle">Skill</div><div>${skill?.id || "None"}</div></div>
             <div class="context-kv"><div class="subtle">Run Status</div><div>${run ? run.status : "Drafting"}</div></div>
             <div class="context-kv"><div class="subtle">Confidence</div><div>${insight?.confidence != null ? Number(insight.confidence).toFixed(2) : "n/a"}</div></div>
+            <div class="context-kv"><div class="subtle">Workspace Agent</div><div>${appState.workspaceAgentProfile?.name || "InsightFoundry Agent"}</div></div>
+            <div class="context-kv"><div class="subtle">Unread Notifications</div><div>${appState.notifications.filter((item) => !item.read).length}</div></div>
           </div>
         `;
       }
@@ -1440,21 +1735,21 @@
 
         if (tab === "comments") {
           const thread = currentThread();
-          const comments = thread ? (appState.commentsByThread[thread.id] || []) : [];
+          const comments = thread ? (appState.messagesByThread[thread.id] || []) : [];
           body.innerHTML = `
-            <h4>Thread Comments</h4>
+            <h4>Thread Feed</h4>
             <div class="subtle">${thread ? thread.title : "No thread selected"}</div>
             <div class="list" style="margin-top:8px">
               ${comments.length ? comments.slice(-10).map((comment) => `
                 <div class="item">
-                  <div><strong>${comment.authorName}</strong> <span class="subtle">${new Date(comment.createdAt).toLocaleString()}</span></div>
-                  <div>${comment.body}</div>
+                  <div><strong style="color:${teamColorForMember(comment.authorId)}">${comment.authorName}</strong> <span class="subtle">${new Date(comment.createdAt).toLocaleString()}</span></div>
+                  <div>${escapeHtml(comment.body)}</div>
                 </div>
               `).join("") : `<div class="item">No comments yet</div>`}
             </div>
             <div class="toolbar" style="margin-top:8px">
-              <input id="quickCommentInput" placeholder="Leave a comment in this thread" />
-              <button id="quickCommentBtn" type="button">Comment</button>
+              <input id="quickCommentInput" placeholder="Leave a message in this thread" />
+              <button id="quickCommentBtn" type="button">Send</button>
             </div>
           `;
           const quickCommentBtn = document.getElementById("quickCommentBtn");
@@ -1463,11 +1758,12 @@
               const quickCommentInput = document.getElementById("quickCommentInput");
               const text = quickCommentInput?.value?.trim() ?? "";
               if (!text || !thread) return;
-              await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
+              await api(`/v1/workspace/chat/threads/${encodeURIComponent(thread.id)}/messages`, {
                 method: "POST",
                 body: JSON.stringify({
                   authorName: "ui-user",
-                  role: "comment",
+                  authorType: "user",
+                  visibility: "shared",
                   body: text
                 })
               });
@@ -1686,9 +1982,30 @@
       }
 
       function renderSettingsTeam() {
+        const agent = appState.workspaceAgentProfile || {};
         const box = document.getElementById("settings-team");
         box.innerHTML = `
           <h3>Team</h3>
+          <div class="card" style="margin-top:8px">
+            <h4>Workspace Agent</h4>
+            <div class="form-grid">
+              <label>Name<input id="workspaceAgentName" value="${agent.name || "InsightFoundry Agent"}" /></label>
+              <label>Tone
+                <select id="workspaceAgentTone">
+                  <option value="operator" ${agent.tonePreset === "operator" ? "selected" : ""}>operator</option>
+                  <option value="analyst" ${agent.tonePreset === "analyst" ? "selected" : ""}>analyst</option>
+                  <option value="executive" ${agent.tonePreset === "executive" ? "selected" : ""}>executive</option>
+                </select>
+              </label>
+              <label>Avatar
+                <select id="workspaceAgentAvatar">
+                  <option value="orb" ${agent.avatarStyle === "orb" ? "selected" : ""}>orb</option>
+                  <option value="badge" ${agent.avatarStyle === "badge" ? "selected" : ""}>badge</option>
+                </select>
+              </label>
+              <button id="saveWorkspaceAgentBtn" class="primary">Save Agent</button>
+            </div>
+          </div>
           <div class="subtle">Add members for shared workspace threads, comments, and approvals.</div>
           <div class="form-grid" style="margin-top:8px">
             <label>Name<input id="teamName" placeholder="Alex Rivera" /></label>
@@ -1711,12 +2028,54 @@
         const teamList = document.getElementById("teamList");
         teamList.innerHTML = appState.team.length
           ? appState.team.map((member) => `
-              <div class="item">
+              <div class="item" data-member-id="${member.id}">
                 <div><strong>${member.name}</strong> <span class="status mono">${member.role}</span></div>
                 <div class="subtle">${member.email}${member.title ? ` • ${member.title}` : ""}</div>
+                <div class="form-grid" style="margin-top:8px">
+                  <label>Color Mode
+                    <select data-member-color-mode>
+                      <option value="deterministic" ${(appState.teamAppearanceByMember[member.id]?.colorMode || "deterministic") === "deterministic" ? "selected" : ""}>deterministic</option>
+                      <option value="manual" ${(appState.teamAppearanceByMember[member.id]?.colorMode || "deterministic") === "manual" ? "selected" : ""}>manual</option>
+                    </select>
+                  </label>
+                  <label>Color Hex<input data-member-color value="${appState.teamAppearanceByMember[member.id]?.colorHex || teamColorForMember(member.id)}" /></label>
+                  <button data-save-member-color="${member.id}">Save Color</button>
+                </div>
               </div>
             `).join("")
           : `<div class="item">No team members yet</div>`;
+
+        const saveWorkspaceAgentBtn = document.getElementById("saveWorkspaceAgentBtn");
+        if (saveWorkspaceAgentBtn) {
+          saveWorkspaceAgentBtn.onclick = async () => {
+            await api("/v1/settings/workspace-agent", {
+              method: "PATCH",
+              body: JSON.stringify({
+                name: document.getElementById("workspaceAgentName").value,
+                tonePreset: document.getElementById("workspaceAgentTone").value,
+                avatarStyle: document.getElementById("workspaceAgentAvatar").value
+              })
+            });
+            await loadAll();
+            setSettingsTab("team");
+          };
+        }
+
+        teamList.querySelectorAll("[data-save-member-color]").forEach((btn) => {
+          btn.onclick = async () => {
+            const container = btn.closest("[data-member-id]");
+            if (!container) return;
+            const memberId = btn.dataset.saveMemberColor;
+            const colorMode = container.querySelector("[data-member-color-mode]")?.value || "deterministic";
+            const colorHex = container.querySelector("[data-member-color]")?.value || null;
+            await api(`/v1/settings/team/${encodeURIComponent(memberId)}/appearance`, {
+              method: "PATCH",
+              body: JSON.stringify({ colorMode, colorHex })
+            });
+            await loadAll();
+            setSettingsTab("team");
+          };
+        });
 
         const addTeamMemberBtn = document.getElementById("addTeamMemberBtn");
         if (addTeamMemberBtn) {
@@ -2766,15 +3125,44 @@
         appState.sourceRunHistoryByConnection = Object.fromEntries(entries);
       }
 
-      async function refreshThreadComments() {
+      async function refreshThreadMessages() {
         const threadId = appState.activeThreadId;
-        if (!threadId) return;
-        try {
-          const result = await api(`/v1/workspace/threads/${encodeURIComponent(threadId)}/comments`);
-          appState.commentsByThread[threadId] = result.comments || [];
-        } catch {
-          appState.commentsByThread[threadId] = [];
+        if (!threadId) {
+          appState.messagesByThread = {};
+          appState.repliesByMessage = {};
+          appState.threadAttachmentsByThread = {};
+          return;
         }
+        try {
+          const result = await api(`/v1/workspace/chat/threads/${encodeURIComponent(threadId)}/messages`);
+          const messages = result.messages || [];
+          appState.messagesByThread[threadId] = messages;
+          const replyEntries = await Promise.all(messages.map(async (message) => {
+            const replies = await api(`/v1/workspace/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(message.id)}/replies`)
+              .then((payload) => payload.replies || [])
+              .catch(() => []);
+            return [message.id, replies];
+          }));
+          appState.repliesByMessage = Object.fromEntries(replyEntries);
+          const attachments = await api(`/v1/workspace/chat/threads/${encodeURIComponent(threadId)}/attachments`)
+            .then((payload) => payload.attachments || [])
+            .catch(() => []);
+          appState.threadAttachmentsByThread[threadId] = attachments;
+        } catch {
+          appState.messagesByThread[threadId] = [];
+          appState.repliesByMessage = {};
+          appState.threadAttachmentsByThread[threadId] = [];
+        }
+      }
+
+      async function refreshFolderAutomations() {
+        if (!appState.activeFolderId) {
+          appState.folderAutomations = [];
+          return;
+        }
+        const response = await api(`/v1/automations/folders/${encodeURIComponent(appState.activeFolderId)}`)
+          .catch(() => ({ automations: [] }));
+        appState.folderAutomations = response.automations || [];
       }
 
       async function refreshRunArtifacts() {
@@ -2821,8 +3209,10 @@
         let agentJobsRes;
         let deviceCommandsRes;
         let integrationsCatalogRes;
+        let notificationsRes;
+        let workspaceAgentRes;
         try {
-          [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes, teamRes, foldersRes, threadsRes, skillToolsRes, mcpCatalogRes, mcpServersRes, agentJobsRes, deviceCommandsRes, integrationsCatalogRes] = await Promise.all([
+          [settingsRes, connRes, profilesRes, reportTypeRes, skillsRes, draftsRes, runsRes, insightRes, actionsRes, channelEventsRes, teamRes, foldersRes, threadsRes, skillToolsRes, mcpCatalogRes, mcpServersRes, agentJobsRes, deviceCommandsRes, integrationsCatalogRes, notificationsRes, workspaceAgentRes] = await Promise.all([
             api("/v1/settings"),
             api("/v1/sources/connections"),
             api("/v1/models/profiles"),
@@ -2841,7 +3231,9 @@
             api("/v1/settings/mcp/servers").catch(() => ({ servers: [] })),
             api("/v1/agents/jobs").catch(() => ({ jobs: [] })),
             api("/v1/agents/device-commands").catch(() => ({ requests: [] })),
-            api("/v1/integrations/catalog").catch(() => ({ integrations: [] }))
+            api("/v1/integrations/catalog").catch(() => ({ integrations: [] })),
+            api("/v1/workspace/notifications").catch(() => ({ notifications: [] })),
+            api("/v1/settings/workspace-agent").catch(() => ({ profile: null }))
           ]);
           setSystemAlert("");
         } catch (error) {
@@ -2865,6 +3257,7 @@
         appState.pendingActions = actionsRes.actions || [];
         appState.channelEvents = channelEventsRes.events || [];
         appState.team = teamRes.team || [];
+        appState.teamAppearanceByMember = Object.fromEntries((teamRes.appearance || []).map((item) => [item.memberId, item]));
         appState.folders = foldersRes.folders || [];
         appState.threads = threadsRes.threads || [];
         appState.mcpProviders = mcpCatalogRes.providers || [];
@@ -2872,12 +3265,10 @@
         appState.agentJobs = agentJobsRes.jobs || [];
         appState.deviceCommands = deviceCommandsRes.requests || [];
         appState.integrationCatalog = integrationsCatalogRes.integrations || [];
+        appState.notifications = notificationsRes.notifications || [];
+        appState.workspaceAgentProfile = workspaceAgentRes.profile || null;
 
         const checklist = appState.settings?.checklist || {};
-        const onboardingIncomplete = Object.values(checklist).some((value) => !value);
-        if (onboardingIncomplete && !appState.focusMode) {
-          appState.rightRailCollapsed = true;
-        }
 
         if (!appState.activeFolderId || !appState.folders.some((item) => item.id === appState.activeFolderId)) {
           appState.activeFolderId = appState.folders[0]?.id || null;
@@ -2893,7 +3284,8 @@
 
         await refreshMetrics();
         await refreshSourceRunHistory();
-        await refreshThreadComments();
+        await refreshThreadMessages();
+        await refreshFolderAutomations();
         await refreshRunArtifacts();
 
         renderOnboarding();
@@ -2904,8 +3296,11 @@
         renderRunContextList();
         renderThreadList();
         renderSharedThread();
+        renderSidebarSkills();
+        renderSidebarAutomations();
         renderAttachmentTray();
         renderChatQuickActions();
+        renderRightRail();
         renderRunList();
         renderRunDetail();
         renderContextPanel();
@@ -2997,7 +3392,45 @@
         appendMessage(`Delivery event ${eventId} retried.`);
       }
 
-      async function runChatIntent(promptText) {
+      async function postThreadMessage({ threadId, body, parentMessageId = null, visibility = "shared" }) {
+        const payload = {
+          body,
+          parentMessageId,
+          visibility,
+          authorType: "user",
+          authorName: "ui-user",
+          attachments: appState.pendingAttachments.map((attachment, idx) => ({
+            id: `${Date.now()}_${idx + 1}`,
+            name: attachment.name,
+            type: attachment.type,
+            size: attachment.size
+          }))
+        };
+        const response = await api(`/v1/workspace/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+        appState.pendingAttachments = [];
+        renderAttachmentTray();
+        return response.message;
+      }
+
+      async function askAiForMessage(messageId, visibility = "shared", responseText = "") {
+        const thread = currentThread();
+        if (!thread || !messageId) return;
+        await api(`/v1/workspace/chat/threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(messageId)}/ai`, {
+          method: "POST",
+          body: JSON.stringify({
+            visibility,
+            responseText
+          })
+        });
+        await loadAll();
+      }
+
+      async function runChatIntent(promptText, options = {}) {
+        const askAi = Boolean(options.askAi);
+        const aiVisibility = options.aiVisibility === "private" ? "private" : "shared";
         const modelCommandMatch = promptText.match(/^\/model\s+(.+)$/i);
         if (modelCommandMatch) {
           const query = modelCommandMatch[1].trim().toLowerCase();
@@ -3019,47 +3452,51 @@
         }
 
         const thread = currentThread();
-        const attachmentNote = appState.pendingAttachments.length
-          ? `\n\nAttachments: ${appState.pendingAttachments.map((item) => item.name).join(", ")}`
-          : "";
-        const fullPrompt = `${promptText}${attachmentNote}`;
-        if (thread) {
-          await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
-            method: "POST",
-            body: JSON.stringify({
-              authorName: "ui-user",
-              role: "user",
-              body: fullPrompt
-            })
-          });
-        } else {
-          appendMessage(fullPrompt, "user");
+        if (!thread) {
+          appendMessage("Create or select a thread first.");
+          return;
         }
-
-        const response = await api("/v1/models/run", {
-          method: "POST",
-          body: JSON.stringify({
-            objective: /anomaly/i.test(promptText) ? "anomaly" : profile.objective,
-            outputMetricIds: [profile.targetMetricId],
-            horizonDays: profile.horizonDays,
-            provider: profile.provider
-          })
+        const fullPrompt = String(promptText || "").trim() || "Analyze attached files and screenshots.";
+        const userMessage = await postThreadMessage({
+          threadId: thread.id,
+          body: fullPrompt
         });
 
-        if (thread) {
-          await api(`/v1/workspace/threads/${encodeURIComponent(thread.id)}/comments`, {
+        if (askAi) {
+          const response = await api("/v1/models/run", {
             method: "POST",
             body: JSON.stringify({
-              authorName: "InsightFoundry",
-              role: "assistant",
-              body: response.insight.summary
+              objective: /anomaly/i.test(promptText) ? "anomaly" : profile.objective,
+              outputMetricIds: [profile.targetMetricId],
+              horizonDays: profile.horizonDays,
+              provider: profile.provider
             })
           });
+          await askAiForMessage(userMessage.id, aiVisibility, response.insight.summary);
         } else {
-          appendMessage(response.insight.summary, "ai");
+          await loadAll();
         }
-        appState.pendingAttachments = [];
+      }
+
+      async function replyInMiniThread() {
+        const parentMessageId = appState.miniThreadParentMessageId;
+        const thread = currentThread();
+        const input = document.getElementById("miniThreadReplyInput");
+        const body = input?.value?.trim() || "";
+        if (!thread || !parentMessageId || !body) return;
+        await api(`/v1/workspace/chat/threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(parentMessageId)}/replies`, {
+          method: "POST",
+          body: JSON.stringify({
+            body,
+            visibility: "shared",
+            authorType: "user",
+            authorName: "ui-user"
+          })
+        });
+        if (input) input.value = "";
         await loadAll();
+        appState.miniThreadParentMessageId = parentMessageId;
+        renderMiniThreadDrawer();
       }
 
       function openSettingsTab(tab) {
@@ -3073,6 +3510,22 @@
 
         if (command === "new run") {
           await createDraftRunFromBuilder();
+          return;
+        }
+        if (command === "new thread") {
+          const folderId = appState.activeFolderId || appState.folders[0]?.id;
+          if (!folderId) {
+            appendMessage("Create a folder first.");
+            return;
+          }
+          await api("/v1/workspace/threads", {
+            method: "POST",
+            body: JSON.stringify({
+              folderId,
+              title: "New Workspace Thread"
+            })
+          });
+          await loadAll();
           return;
         }
         if (command === "execute run") {
@@ -3115,7 +3568,7 @@
           openSettingsTab("skills");
           return;
         }
-        appendMessage("Unknown command. Try: new run | execute run | deliver run | open settings setup/integrations/connections/channels/team/mcp/models/skills");
+        appendMessage("Unknown command. Try: new thread | new run | execute run | deliver run | open settings setup/integrations/connections/channels/team/mcp/models/skills");
       }
 
       function bindEvents() {
@@ -3152,6 +3605,10 @@
           btn.onclick = () => setContextTab(btn.dataset.contextTab);
         });
 
+        document.getElementById("rightRailTabWorking").onclick = () => setRightRailTab("working");
+        document.getElementById("rightRailTabAttachments").onclick = () => setRightRailTab("attachments");
+        document.getElementById("rightRailTabNotifications").onclick = () => setRightRailTab("notifications");
+
         document.getElementById("createRunBtn").onclick = createDraftRunFromBuilder;
         document.getElementById("executeRunBtn").onclick = executeCurrentRun;
         document.getElementById("deliverRunBtn").onclick = deliverCurrentRun;
@@ -3162,6 +3619,43 @@
         document.getElementById("quickSettingsBtn").onclick = () => openSettingsTab("setup");
         document.getElementById("chatOpenModelsBtn").onclick = () => openSettingsTab("models");
         document.getElementById("chatOpenChannelsBtn").onclick = () => openSettingsTab("channels");
+        document.getElementById("leftNewThreadBtn").onclick = () => {
+          document.getElementById("newThreadTitleInput").focus();
+        };
+        document.getElementById("leftNewSkillBtn").onclick = () => openSettingsTab("skills");
+        document.getElementById("leftNewAutomationBtn").onclick = async () => {
+          if (!appState.activeFolderId) {
+            appendMessage("Select a folder first.");
+            return;
+          }
+          const defaultThreadId = appState.activeThreadId || appState.threads.find((thread) => thread.folderId === appState.activeFolderId)?.id || null;
+          await api(`/v1/automations/folders/${encodeURIComponent(appState.activeFolderId)}`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: "Folder Heartbeat",
+              triggerType: "heartbeat",
+              heartbeatContent: `---
+enabled: true
+intervalMinutes: 5
+targetThreadId: ${defaultThreadId || ""}
+triggers:
+  - id: stale_data
+    when: source_freshness_hours() > 24
+    action: run_agent_job
+    cooldownMinutes: 30
+---
+Automation notes.`,
+              actionType: "run_agent_job",
+              actionPayload: {
+                jobType: "cowork_thread",
+                input: "Heartbeat trigger fired. Summarize latest blockers."
+              },
+              targetThreadId: defaultThreadId
+            })
+          });
+          await loadAll();
+          appendMessage("Automation created for active folder.");
+        };
         document.getElementById("runCoworkAgentBtn").onclick = async () => {
           if (!appState.activeFolderId) {
             appendMessage("Select a folder first.", "ai");
@@ -3205,6 +3699,7 @@
           setContextTab("actions");
           appendMessage("Device command request submitted for approval.");
         };
+
         document.getElementById("newFolderBtn").onclick = async () => {
           const input = document.getElementById("newFolderNameInput");
           const name = input.value.trim();
@@ -3230,10 +3725,18 @@
           input.value = "";
           await loadAll();
         };
-        const quickSkillsBtn = document.getElementById("quickSkillsBtn");
-        if (quickSkillsBtn) {
-          quickSkillsBtn.onclick = () => openSettingsTab("skills");
-        }
+
+        document.getElementById("closeMiniThreadBtn").onclick = () => {
+          appState.miniThreadParentMessageId = null;
+          renderMiniThreadDrawer();
+        };
+        document.getElementById("miniThreadReplyBtn").onclick = replyInMiniThread;
+        document.getElementById("miniThreadReplyInput").addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          await replyInMiniThread();
+        });
+
         const attachFilesBtn = document.getElementById("attachFilesBtn");
         const chatFileInput = document.getElementById("chatFileInput");
         if (attachFilesBtn && chatFileInput) {
@@ -3250,6 +3753,21 @@
             renderAttachmentTray();
           };
         }
+
+        document.getElementById("askAiSharedBtn").onclick = async () => {
+          const input = document.getElementById("chatInput");
+          const text = input.value.trim();
+          if (!text && !appState.pendingAttachments.length) return;
+          input.value = "";
+          await runChatIntent(text || "Analyze attached files and screenshots.", { askAi: true, aiVisibility: "shared" });
+        };
+        document.getElementById("askAiPrivateBtn").onclick = async () => {
+          const input = document.getElementById("chatInput");
+          const text = input.value.trim();
+          if (!text && !appState.pendingAttachments.length) return;
+          input.value = "";
+          await runChatIntent(text || "Analyze attached files and screenshots.", { askAi: true, aiVisibility: "private" });
+        };
 
         ["runSourceSelect", "runModelSelect", "runReportSelect", "runSkillSelect", "runChannelsInput"].forEach((id) => {
           const el = document.getElementById(id);
@@ -3276,11 +3794,24 @@
 
         window.addEventListener("keydown", (event) => {
           const isCommandPalette = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
-          if (!isCommandPalette) return;
-          event.preventDefault();
-          const input = document.getElementById("commandInput");
-          input.focus();
-          input.select();
+          const isNewThread = event.key.toLowerCase() === "t" && event.altKey;
+          const isNewAutomation = event.key.toLowerCase() === "a" && event.altKey;
+          if (isCommandPalette) {
+            event.preventDefault();
+            const input = document.getElementById("commandInput");
+            input.focus();
+            input.select();
+            return;
+          }
+          if (isNewThread) {
+            event.preventDefault();
+            document.getElementById("newThreadTitleInput").focus();
+            return;
+          }
+          if (isNewAutomation) {
+            event.preventDefault();
+            document.getElementById("leftNewAutomationBtn").click();
+          }
         });
         document.getElementById("chatInput").addEventListener("paste", (event) => {
           const files = Array.from(event.clipboardData?.files || []);
@@ -3299,7 +3830,7 @@
           const text = input.value.trim();
           if (!text && !appState.pendingAttachments.length) return;
           input.value = "";
-          await runChatIntent(text || "Analyze attached files and screenshots.");
+          await runChatIntent(text || "Analyze attached files and screenshots.", { askAi: false });
         });
       }
 

@@ -21,9 +21,16 @@ function serializeState(state) {
     materializationRuns: state.materializationRuns,
     mcpServers: state.mcpServers,
     teamMembers: state.teamMembers,
+    teamMemberAppearance: state.teamMemberAppearance,
     workspaceFolders: state.workspaceFolders,
     workspaceThreads: state.workspaceThreads,
     workspaceComments: state.workspaceComments,
+    workspaceAgentProfiles: state.workspaceAgentProfiles,
+    chatMessages: state.chatMessages,
+    notifications: state.notifications,
+    folderAutomations: state.folderAutomations,
+    automationRuns: state.automationRuns,
+    heartbeatState: state.heartbeatState,
     installedSkills: state.installedSkills,
     skillDrafts: state.skillDrafts,
     skillRuns: state.skillRuns,
@@ -60,9 +67,16 @@ function hydrateState(state, payload = {}) {
   state.materializationRuns = payload.materializationRuns ?? state.materializationRuns;
   state.mcpServers = payload.mcpServers ?? state.mcpServers;
   state.teamMembers = payload.teamMembers ?? state.teamMembers;
+  state.teamMemberAppearance = payload.teamMemberAppearance ?? state.teamMemberAppearance;
   state.workspaceFolders = payload.workspaceFolders ?? state.workspaceFolders;
   state.workspaceThreads = payload.workspaceThreads ?? state.workspaceThreads;
   state.workspaceComments = payload.workspaceComments ?? state.workspaceComments;
+  state.workspaceAgentProfiles = payload.workspaceAgentProfiles ?? state.workspaceAgentProfiles;
+  state.chatMessages = payload.chatMessages ?? state.chatMessages;
+  state.notifications = payload.notifications ?? state.notifications;
+  state.folderAutomations = payload.folderAutomations ?? state.folderAutomations;
+  state.automationRuns = payload.automationRuns ?? state.automationRuns;
+  state.heartbeatState = payload.heartbeatState ?? state.heartbeatState;
   state.installedSkills = payload.installedSkills ?? state.installedSkills;
   state.skillDrafts = payload.skillDrafts ?? state.skillDrafts;
   state.skillRuns = payload.skillRuns ?? state.skillRuns;
