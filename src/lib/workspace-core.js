@@ -93,6 +93,25 @@ function projectMessageForViewer(message, viewerUserId) {
   };
 }
 
+function messageVisibleInThreadMode(message, thread, viewerUserId, viewerChannel) {
+  const mode = thread.contextMode ?? "shared";
+  if (mode === "shared") return true;
+  if (mode === "per-user") {
+    return message.authorId === viewerUserId
+      || message.privateRecipientUserId === viewerUserId
+      || message.authorId === "system"
+      || message.authorId === "workspace_agent";
+  }
+  if (mode === "per-channel-user") {
+    const channel = String(viewerChannel ?? "web");
+    const viewerKey = `${channel}:${viewerUserId}`;
+    return message.channelUserKey === viewerKey
+      || message.privateRecipientUserId === viewerUserId
+      || message.authorId === "system";
+  }
+  return true;
+}
+
 function normalizeMemberAlias(input = "") {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -600,6 +619,7 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
 
   const author = normalizeMessageAuthor(state, tenant.id, payload, actor);
   const createdAt = nowIso();
+  const channel = String(payload.channel ?? actor.channel ?? "web");
   const message = {
     id: newId("chat_msg"),
     tenantId: tenant.id,
@@ -618,6 +638,8 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
     hasMiniThread: false,
     replyCount: 0,
     isPrivateMarker: Boolean(payload.isPrivateMarker),
+    channel,
+    channelUserKey: `${channel}:${author.authorId}`,
     createdAt,
     updatedAt: createdAt
   };
@@ -643,16 +665,17 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
   return message;
 }
 
-export function listThreadMessages(state, tenantId, threadId, viewerUserId) {
-  requireWorkspaceThread(state, tenantId, threadId);
+export function listThreadMessages(state, tenantId, threadId, viewerUserId, viewerChannel = "web") {
+  const thread = requireWorkspaceThread(state, tenantId, threadId);
   return state.chatMessages
     .filter((item) => item.tenantId === tenantId && item.threadId === threadId && item.parentMessageId === null)
+    .filter((item) => messageVisibleInThreadMode(item, thread, viewerUserId, viewerChannel))
     .sort(compareByCreatedAtAsc)
     .map((message) => projectMessageForViewer(message, viewerUserId));
 }
 
-export function listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId) {
-  requireWorkspaceThread(state, tenantId, threadId);
+export function listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel = "web") {
+  const thread = requireWorkspaceThread(state, tenantId, threadId);
   const parent = requireChatMessage(state, tenantId, parentMessageId);
   if (parent.threadId !== threadId) {
     const err = new Error(`Parent message '${parentMessageId}' is not in thread '${threadId}'`);
@@ -661,18 +684,19 @@ export function listMessageReplies(state, tenantId, threadId, parentMessageId, v
   }
   return state.chatMessages
     .filter((item) => item.tenantId === tenantId && item.threadId === threadId && item.parentMessageId === parentMessageId)
+    .filter((item) => messageVisibleInThreadMode(item, thread, viewerUserId, viewerChannel))
     .sort(compareByCreatedAtAsc)
     .map((reply) => projectMessageForViewer(reply, viewerUserId));
 }
 
-export function getMiniThread(state, tenantId, threadId, parentMessageId, viewerUserId) {
+export function getMiniThread(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel = "web") {
   const parent = requireChatMessage(state, tenantId, parentMessageId);
   if (parent.threadId !== threadId) {
     const err = new Error(`Parent message '${parentMessageId}' is not in thread '${threadId}'`);
     err.statusCode = 400;
     throw err;
   }
-  const replies = listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId);
+  const replies = listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel);
   return {
     parent: projectMessageForViewer(parent, viewerUserId),
     replies,
@@ -748,10 +772,11 @@ export function createAiReplyForMessage(state, tenant, payload = {}, actor = {})
   return aiMessage;
 }
 
-export function listThreadAttachments(state, tenantId, threadId, viewerUserId) {
-  requireWorkspaceThread(state, tenantId, threadId);
+export function listThreadAttachments(state, tenantId, threadId, viewerUserId, viewerChannel = "web") {
+  const thread = requireWorkspaceThread(state, tenantId, threadId);
   return state.chatMessages
     .filter((message) => message.tenantId === tenantId && message.threadId === threadId)
+    .filter((message) => messageVisibleInThreadMode(message, thread, viewerUserId, viewerChannel))
     .map((message) => projectMessageForViewer(message, viewerUserId))
     .flatMap((message) => (message.attachments || []).map((attachment) => ({
       ...attachment,
@@ -1132,4 +1157,3 @@ export function ensureWorkspaceCoreDefaults(state, tenant) {
     });
   }
 }
-

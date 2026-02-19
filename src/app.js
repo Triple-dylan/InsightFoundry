@@ -32,6 +32,7 @@ import {
   patchWorkspaceFolder,
   listWorkspaceThreads,
   createWorkspaceThread,
+  patchWorkspaceThread,
   requireWorkspaceThread,
   listThreadComments,
   createThreadComment
@@ -60,6 +61,24 @@ import {
   processFolderAutomations
 } from "./lib/workspace-core.js";
 import {
+  listProjectMemories,
+  createProjectMemory,
+  patchProjectMemory,
+  listUserMemories,
+  createUserMemory,
+  patchUserMemory,
+  buildMemoryContext,
+  snapshotMemoryContext,
+  listMemorySnapshots,
+  ingestRememberCommand
+} from "./lib/memory.js";
+import {
+  runDoctor,
+  listDoctorRuns,
+  listSecurityAuditRuns,
+  loadThreatModel
+} from "./lib/system-health.js";
+import {
   listMcpProviderCatalog,
   listMcpServers,
   createMcpServer,
@@ -79,7 +98,10 @@ import {
 } from "./lib/sources.js";
 import { runLiveQuery, materializeQueryResult } from "./lib/query-broker.js";
 import {
+  ensureSkillRegistry,
   listSkillCatalog,
+  listSkillRegistry,
+  registerSkillInRegistry,
   listSkillTools,
   installSkillPack,
   listInstalledSkillPacks,
@@ -219,6 +241,7 @@ function demoSeed(state) {
 
   installSkillPack(state, tenant, { skillId: "marketing-optimizer", active: true });
   installSkillPack(state, tenant, { skillId: "finance-forecast-analyst", active: true });
+  ensureSkillRegistry(state);
   ensureTenantSettings(state, tenant);
   ensureDefaultModelProfiles(state, tenant);
   ensureDefaultReportTypes(state, tenant);
@@ -304,6 +327,29 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       }, 5_000)
     : null;
 
+  const doctorTimer = startBackground
+    ? setInterval(async () => {
+        for (const tenant of state.tenants.values()) {
+          if (!tenant.autonomyPolicy?.doctorAutoRun) continue;
+          const intervalHours = Number(tenant.autonomyPolicy?.securityAuditIntervalHours ?? 24);
+          const latest = state.doctorRuns
+            .filter((item) => item.tenantId === tenant.id)
+            .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+          const due = !latest
+            || (Date.now() - Date.parse(latest.createdAt)) > intervalHours * 60 * 60 * 1000;
+          if (!due) continue;
+          const result = runDoctor(state, tenant, { applyFixes: false });
+          pushAudit(state, {
+            tenantId: tenant.id,
+            actorId: "doctor_scheduler",
+            action: "system_doctor_run",
+            details: { runId: result.run.id, status: result.run.status, auto: true }
+          });
+        }
+        await persistState();
+      }, 60_000)
+    : null;
+
   const server = http.createServer(async (req, res) => {
     try {
       const method = req.method ?? "GET";
@@ -363,6 +409,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         ensureDefaultModelProfiles(state, tenant);
         ensureDefaultReportTypes(state, tenant);
         ensureCollaborationDefaults(state, tenant);
+        ensureSkillRegistry(state);
         ensureWorkspaceCoreDefaults(state, tenant);
         await persistState();
 
@@ -377,6 +424,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         ensureDefaultModelProfiles(state, tenant);
         ensureDefaultReportTypes(state, tenant);
         ensureCollaborationDefaults(state, tenant);
+        ensureSkillRegistry(state);
         ensureWorkspaceCoreDefaults(state, tenant);
         const settings = getTenantSettings(state, tenant);
         respondJson(res, 200, { settings });
@@ -742,14 +790,38 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      if (method === "PATCH" && workspaceThreadMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const thread = patchWorkspaceThread(state, ctx.tenantId, workspaceThreadMatch.threadId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_thread_updated",
+          details: { threadId: thread.id, contextMode: thread.contextMode }
+        });
+        await persistState();
+        respondJson(res, 200, { thread });
+        return;
+      }
+
       const workspaceChatMessagesMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/messages");
       if (method === "GET" && workspaceChatMessagesMatch) {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
-        const messages = listThreadMessages(state, ctx.tenantId, workspaceChatMessagesMatch.threadId, ctx.userId);
-        respondJson(res, 200, { messages });
+        const thread = requireWorkspaceThread(state, ctx.tenantId, workspaceChatMessagesMatch.threadId);
+        const messages = listThreadMessages(state, ctx.tenantId, workspaceChatMessagesMatch.threadId, ctx.userId, ctx.channel);
+        const memoryContext = buildMemoryContext(state, ctx.tenantId, ctx.userId, {
+          folderId: thread.folderId,
+          threadId: thread.id,
+          limit: 8
+        });
+        respondJson(res, 200, { messages, memoryContext });
         return;
       }
 
@@ -768,18 +840,30 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           privateRecipientUserId: body.privateRecipientUserId,
           body: body.body,
           attachments: body.attachments,
+          channel: ctx.channel,
           authorType: body.authorType ?? "user",
           authorId: body.authorId ?? ctx.userId,
           authorName: body.authorName ?? ctx.userId
         }, ctx);
+        const memoryCapture = ingestRememberCommand(state, tenant, ctx.userId, {
+          body: body.body,
+          folderId: message.folderId,
+          threadId: message.threadId,
+          tags: body.tags
+        });
         pushAudit(state, {
           tenantId: tenant.id,
           actorId: ctx.userId,
           action: "workspace_message_created",
-          details: { threadId: workspaceChatMessagesMatch.threadId, messageId: message.id, visibility: message.visibility }
+          details: {
+            threadId: workspaceChatMessagesMatch.threadId,
+            messageId: message.id,
+            visibility: message.visibility,
+            memoryCaptured: Boolean(memoryCapture)
+          }
         });
         await persistState();
-        respondJson(res, 201, { message });
+        respondJson(res, 201, { message, memoryCapture });
         return;
       }
 
@@ -825,7 +909,8 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           ctx.tenantId,
           workspaceChatRepliesMatch.threadId,
           workspaceChatRepliesMatch.messageId,
-          ctx.userId
+          ctx.userId,
+          ctx.channel
         );
         respondJson(res, 200, { replies });
         return;
@@ -845,6 +930,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           privateRecipientUserId: body.privateRecipientUserId,
           body: body.body,
           attachments: body.attachments,
+          channel: ctx.channel,
           authorType: body.authorType ?? "user",
           authorId: body.authorId ?? ctx.userId,
           authorName: body.authorName ?? ctx.userId
@@ -871,7 +957,8 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           ctx.tenantId,
           workspaceMiniThreadMatch.threadId,
           workspaceMiniThreadMatch.parentMessageId,
-          ctx.userId
+          ctx.userId,
+          ctx.channel
         );
         respondJson(res, 200, { miniThread });
         return;
@@ -883,7 +970,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireTenantHeader(ctx);
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
-        const attachments = listThreadAttachments(state, ctx.tenantId, workspaceAttachmentsMatch.threadId, ctx.userId);
+        const attachments = listThreadAttachments(state, ctx.tenantId, workspaceAttachmentsMatch.threadId, ctx.userId, ctx.channel);
         respondJson(res, 200, { attachments });
         return;
       }
@@ -906,6 +993,206 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const notification = markNotificationRead(state, ctx.tenantId, ctx.userId, workspaceNotificationReadMatch.notificationId);
         await persistState();
         respondJson(res, 200, { notification });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/memory/projects") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const memories = listProjectMemories(state, ctx.tenantId, {
+          folderId: base.searchParams.get("folderId") ?? undefined,
+          threadId: base.searchParams.get("threadId") ?? undefined,
+          domain: base.searchParams.get("domain") ?? undefined
+        });
+        respondJson(res, 200, { memories });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/memory/projects") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const memory = createProjectMemory(state, tenant, body, ctx.userId);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "project_memory_created",
+          details: { memoryId: memory.id, folderId: memory.folderId, threadId: memory.threadId }
+        });
+        await persistState();
+        respondJson(res, 201, { memory });
+        return;
+      }
+
+      const projectMemoryPatchMatch = pathMatcher(pathname, "/v1/memory/projects/:memoryId");
+      if (method === "PATCH" && projectMemoryPatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const memory = patchProjectMemory(state, ctx.tenantId, projectMemoryPatchMatch.memoryId, body, ctx.userId);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "project_memory_updated",
+          details: { memoryId: memory.id }
+        });
+        await persistState();
+        respondJson(res, 200, { memory });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/memory/users") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const targetUserId = base.searchParams.get("userId") || ctx.userId;
+        if (targetUserId !== ctx.userId && !["owner", "admin", "operator"].includes(ctx.role)) {
+          respondJson(res, 403, { error: "Cannot read another user's memory" });
+          return;
+        }
+        const memories = listUserMemories(state, ctx.tenantId, targetUserId, {
+          folderId: base.searchParams.get("folderId") ?? undefined,
+          threadId: base.searchParams.get("threadId") ?? undefined
+        });
+        respondJson(res, 200, { memories });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/memory/users") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const targetUserId = body.userId && ["owner", "admin", "operator"].includes(ctx.role)
+          ? body.userId
+          : ctx.userId;
+        const memory = createUserMemory(state, tenant, targetUserId, body);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "user_memory_created",
+          details: { memoryId: memory.id, userId: targetUserId }
+        });
+        await persistState();
+        respondJson(res, 201, { memory });
+        return;
+      }
+
+      const userMemoryPatchMatch = pathMatcher(pathname, "/v1/memory/users/:memoryId");
+      if (method === "PATCH" && userMemoryPatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const targetUserId = body.userId && ["owner", "admin", "operator"].includes(ctx.role)
+          ? body.userId
+          : ctx.userId;
+        if (targetUserId !== ctx.userId && !["owner", "admin", "operator"].includes(ctx.role)) {
+          respondJson(res, 403, { error: "Cannot update another user's memory" });
+          return;
+        }
+        const memory = patchUserMemory(state, ctx.tenantId, targetUserId, userMemoryPatchMatch.memoryId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "user_memory_updated",
+          details: { memoryId: memory.id, userId: targetUserId }
+        });
+        await persistState();
+        respondJson(res, 200, { memory });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/memory/context") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const context = buildMemoryContext(state, ctx.tenantId, ctx.userId, {
+          folderId: base.searchParams.get("folderId") ?? undefined,
+          threadId: base.searchParams.get("threadId") ?? undefined,
+          tags: (base.searchParams.get("tags") ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+          limit: Number(base.searchParams.get("limit") ?? 12)
+        });
+        respondJson(res, 200, { context });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/memory/snapshots") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const result = snapshotMemoryContext(state, tenant, ctx.userId, body);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "memory_snapshot_created",
+          details: { snapshotId: result.snapshot.id, contextCount: result.snapshot.contextCount }
+        });
+        await persistState();
+        respondJson(res, 201, result);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/memory/snapshots") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const snapshots = listMemorySnapshots(state, ctx.tenantId, ctx.userId, {
+          folderId: base.searchParams.get("folderId") ?? undefined,
+          threadId: base.searchParams.get("threadId") ?? undefined
+        });
+        respondJson(res, 200, { snapshots });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/system/doctor") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const result = runDoctor(state, tenant, { applyFixes: Boolean(body.applyFixes) });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "system_doctor_run",
+          details: { runId: result.run.id, status: result.run.status }
+        });
+        await persistState();
+        respondJson(res, 200, result);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/system/doctor/runs") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        respondJson(res, 200, { runs: listDoctorRuns(state, ctx.tenantId) });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/system/security-audits") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        respondJson(res, 200, { runs: listSecurityAuditRuns(state, ctx.tenantId) });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/system/threat-model") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        respondJson(res, 200, { threatModel: loadThreatModel() });
         return;
       }
 
@@ -1254,7 +1541,10 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
         const tenant = requireTenant(state, ctx.tenantId);
         const body = await parseJsonBody(req);
-        const run = createAnalysisRun(state, tenant, body);
+        const run = createAnalysisRun(state, tenant, {
+          ...body,
+          createdBy: ctx.userId
+        });
         pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "analysis_run_created", details: { runId: run.id } });
         await persistState();
         respondJson(res, 201, { run });
@@ -1294,8 +1584,13 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           runModelTask,
           requireReportType,
           generateReport,
-          runSkillPack
-        }, body);
+          runSkillPack,
+          buildMemoryContext,
+          snapshotMemoryContext
+        }, {
+          ...body,
+          userId: ctx.userId
+        });
         pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "analysis_run_executed", details: { runId: executed.id, status: executed.status } });
         await persistState();
         respondJson(res, 200, { run: executed });
@@ -1565,8 +1860,54 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      if (method === "GET" && pathname === "/v1/models/providers/health") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const health = [...state.modelProviderHealth.entries()]
+          .map(([key, value]) => ({ key, ...value }))
+          .filter((item) => item.tenantId === ctx.tenantId)
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+        respondJson(res, 200, { health });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/skills/catalog") {
+        ensureSkillRegistry(state);
         respondJson(res, 200, { skills: listSkillCatalog() });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/skills/registry") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const source = base.searchParams.get("source") ?? undefined;
+        const skills = listSkillRegistry(state, { source })
+          .filter((entry) => !entry.tenantScope || entry.tenantScope === ctx.tenantId);
+        respondJson(res, 200, { skills });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/skills/registry") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const entry = registerSkillInRegistry(state, ctx.tenantId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "skill_registry_entry_created",
+          details: {
+            registryId: entry.registryId,
+            source: entry.source,
+            riskLevel: entry.riskLevel
+          }
+        });
+        await persistState();
+        respondJson(res, 201, { entry });
         return;
       }
 
@@ -2011,6 +2352,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
     close: () => {
       stopScheduler();
       if (automationTimer) clearInterval(automationTimer);
+      if (doctorTimer) clearInterval(doctorTimer);
     }
   };
 }

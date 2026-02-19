@@ -1298,3 +1298,323 @@ test("team management updates member role/status and enforces permissions", asyn
     await ctx.stop();
   }
 });
+
+test("memory APIs capture remember commands, enforce scope, and support channel-aware thread context", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Memory Co");
+
+    const teamRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const ownerId = (await teamRes.json()).team[0].id;
+
+    const addMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Analyst Two",
+        email: "analyst.two@example.com",
+        role: "analyst"
+      })
+    });
+    assert.equal(addMemberRes.status, 201);
+    const analystId = (await addMemberRes.json()).member.id;
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const patchThreadRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads/${threadId}`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ contextMode: "per-channel-user" })
+    });
+    assert.equal(patchThreadRes.status, 200);
+
+    const rememberUserRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        body: "/remember Keep weekly pipeline updates concise.",
+        visibility: "shared"
+      })
+    });
+    assert.equal(rememberUserRes.status, 201);
+    const rememberUserBody = await rememberUserRes.json();
+    assert.equal(rememberUserBody.memoryCapture.type, "user");
+
+    const rememberProjectRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: {
+        ...tenantHeaders(tenant.id),
+        "x-channel-id": "slack"
+      },
+      body: JSON.stringify({
+        body: "/remember-project Keep renewal margin above 20%.",
+        visibility: "shared",
+        tags: ["deal-desk", "renewal"]
+      })
+    });
+    assert.equal(rememberProjectRes.status, 201);
+    const rememberProjectBody = await rememberProjectRes.json();
+    assert.equal(rememberProjectBody.memoryCapture.type, "project");
+
+    const webMessagesRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(webMessagesRes.status, 200);
+    const webMessages = (await webMessagesRes.json()).messages;
+    assert.ok(webMessages.some((message) => /weekly pipeline updates/i.test(message.body)));
+    assert.ok(!webMessages.some((message) => /renewal margin above 20/i.test(message.body)));
+
+    const slackMessagesRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      headers: {
+        ...tenantHeaders(tenant.id),
+        "x-channel-id": "slack"
+      }
+    });
+    assert.equal(slackMessagesRes.status, 200);
+    const slackMessages = (await slackMessagesRes.json()).messages;
+    assert.ok(slackMessages.some((message) => /renewal margin above 20/i.test(message.body)));
+
+    const userMemoryRes = await fetch(`${ctx.baseUrl}/v1/memory/users`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(userMemoryRes.status, 200);
+    const userMemories = (await userMemoryRes.json()).memories;
+    assert.ok(userMemories.length >= 1);
+
+    const blockedRead = await fetch(`${ctx.baseUrl}/v1/memory/users?userId=${encodeURIComponent(ownerId)}`, {
+      headers: {
+        ...tenantHeaders(tenant.id, "analyst"),
+        "x-user-id": analystId
+      }
+    });
+    assert.equal(blockedRead.status, 403);
+
+    const memoryContextRes = await fetch(
+      `${ctx.baseUrl}/v1/memory/context?folderId=${encodeURIComponent(folderId)}&threadId=${encodeURIComponent(threadId)}`,
+      { headers: tenantHeaders(tenant.id) }
+    );
+    assert.equal(memoryContextRes.status, 200);
+    const memoryContext = (await memoryContextRes.json()).context;
+    assert.ok(memoryContext.merged.length >= 1);
+
+    const snapshotRes = await fetch(`${ctx.baseUrl}/v1/memory/snapshots`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ folderId, threadId })
+    });
+    assert.equal(snapshotRes.status, 201);
+    const snapshotBody = await snapshotRes.json();
+    assert.ok(snapshotBody.snapshot.id);
+
+    const snapshotsRes = await fetch(`${ctx.baseUrl}/v1/memory/snapshots`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(snapshotsRes.status, 200);
+    const snapshots = (await snapshotsRes.json()).snapshots;
+    assert.ok(snapshots.some((item) => item.id === snapshotBody.snapshot.id));
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("analysis run execution stores memory snapshot and provider failover health", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Memory Run Co");
+
+    const connectionRes = await fetch(`${ctx.baseUrl}/v1/sources/connections`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ sourceType: "google_ads", mode: "hybrid", auth: { token: "x" } })
+    });
+    assert.equal(connectionRes.status, 201);
+    const connectionId = (await connectionRes.json()).connection.id;
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const rememberRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        body: "/remember Anchor reporting to verified source freshness."
+      })
+    });
+    assert.equal(rememberRes.status, 201);
+
+    const profilesRes = await fetch(`${ctx.baseUrl}/v1/models/profiles`, { headers: tenantHeaders(tenant.id) });
+    const modelProfileId = (await profilesRes.json()).profiles[0].id;
+    const reportTypesRes = await fetch(`${ctx.baseUrl}/v1/reports/types`, { headers: tenantHeaders(tenant.id) });
+    const reportTypeId = (await reportTypesRes.json()).types[0].id;
+
+    const runCreateRes = await fetch(`${ctx.baseUrl}/v1/analysis-runs`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        sourceConnectionId: connectionId,
+        modelProfileId,
+        reportTypeId,
+        folderId,
+        threadId
+      })
+    });
+    assert.equal(runCreateRes.status, 201);
+    const runId = (await runCreateRes.json()).run.id;
+
+    const runExecuteRes = await fetch(`${ctx.baseUrl}/v1/analysis-runs/${runId}/execute`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({ forceSync: true })
+    });
+    assert.equal(runExecuteRes.status, 200);
+    const executed = (await runExecuteRes.json()).run;
+    assert.ok(executed.memorySnapshotId);
+
+    const snapshotsRes = await fetch(`${ctx.baseUrl}/v1/memory/snapshots?threadId=${encodeURIComponent(threadId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(snapshotsRes.status, 200);
+    const snapshots = (await snapshotsRes.json()).snapshots;
+    assert.ok(snapshots.some((item) => item.id === executed.memorySnapshotId));
+
+    const modelRunRes = await fetch(`${ctx.baseUrl}/v1/models/run`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        objective: "forecast",
+        outputMetricIds: ["revenue"],
+        provider: "managed-down"
+      })
+    });
+    assert.equal(modelRunRes.status, 200);
+    const modelRunBody = await modelRunRes.json();
+    assert.equal(modelRunBody.run.provider, "managed");
+    assert.ok(modelRunBody.run.providerTrace.failoverTrace.some((step) => step.provider === "managed-down" && step.outcome === "failed"));
+
+    const healthRes = await fetch(`${ctx.baseUrl}/v1/models/providers/health`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(healthRes.status, 200);
+    const health = (await healthRes.json()).health;
+    assert.ok(health.some((item) => item.provider === "managed-down" && item.failCount >= 1));
+    assert.ok(health.some((item) => item.provider === "managed" && item.successCount >= 1));
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("doctor and skill registry endpoints support tenant-scoped hardening workflows", async () => {
+  const ctx = await startServer();
+  try {
+    const tenantA = await createTenant(ctx.baseUrl, "Registry A");
+    const tenantB = await createTenant(ctx.baseUrl, "Registry B");
+
+    const registryRes = await fetch(`${ctx.baseUrl}/v1/skills/registry`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(registryRes.status, 200);
+    const registry = (await registryRes.json()).skills;
+    assert.ok(registry.length >= 1);
+
+    const createRegistryRes = await fetch(`${ctx.baseUrl}/v1/skills/registry`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({
+        source: "workspace",
+        riskLevel: "low",
+        verified: true,
+        tags: ["custom", "memory"],
+        manifest: {
+          id: "tenant-memory-ops",
+          version: "1.0.0",
+          name: "Tenant Memory Ops",
+          description: "Memory-first operational checks.",
+          triggers: { intents: ["memory_ops"], channels: ["web", "api"] },
+          tools: [
+            { id: "compute.data_quality_snapshot", allow: true },
+            { id: "model.run", allow: true }
+          ],
+          guardrails: {
+            confidenceMin: 0.7,
+            humanApprovalFor: ["adjust_budget"],
+            budgetCapUsd: 2000,
+            tokenBudget: 1800,
+            timeBudgetMs: 4000
+          },
+          prompts: { system: "Prioritize memory context and deterministic checks." },
+          schedules: []
+        }
+      })
+    });
+    assert.equal(createRegistryRes.status, 201);
+    const registryEntry = (await createRegistryRes.json()).entry;
+
+    const installRes = await fetch(`${ctx.baseUrl}/v1/skills/install`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({
+        registryId: registryEntry.registryId,
+        active: true
+      })
+    });
+    assert.equal(installRes.status, 201);
+    const install = (await installRes.json()).install;
+    assert.ok(install.id.includes("tenant-memory-ops@1.0.0"));
+
+    const tenantBRegistryRes = await fetch(`${ctx.baseUrl}/v1/skills/registry`, {
+      headers: tenantHeaders(tenantB.id)
+    });
+    assert.equal(tenantBRegistryRes.status, 200);
+    const tenantBRegistry = (await tenantBRegistryRes.json()).skills;
+    assert.ok(!tenantBRegistry.some((entry) => entry.registryId === registryEntry.registryId));
+
+    const doctorRes = await fetch(`${ctx.baseUrl}/v1/system/doctor`, {
+      method: "POST",
+      headers: tenantHeaders(tenantA.id),
+      body: JSON.stringify({ applyFixes: true })
+    });
+    assert.equal(doctorRes.status, 200);
+    const doctorBody = await doctorRes.json();
+    assert.ok(doctorBody.run.id);
+    assert.ok(doctorBody.securityAudit.id);
+
+    const doctorRunsRes = await fetch(`${ctx.baseUrl}/v1/system/doctor/runs`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(doctorRunsRes.status, 200);
+    const doctorRuns = (await doctorRunsRes.json()).runs;
+    assert.ok(doctorRuns.some((run) => run.id === doctorBody.run.id));
+
+    const securityRunsRes = await fetch(`${ctx.baseUrl}/v1/system/security-audits`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(securityRunsRes.status, 200);
+    const securityRuns = (await securityRunsRes.json()).runs;
+    assert.ok(securityRuns.some((run) => run.id === doctorBody.securityAudit.id));
+
+    const threatModelRes = await fetch(`${ctx.baseUrl}/v1/system/threat-model`, {
+      headers: tenantHeaders(tenantA.id)
+    });
+    assert.equal(threatModelRes.status, 200);
+    const threatModel = (await threatModelRes.json()).threatModel;
+    assert.equal(threatModel.exists, true);
+    assert.match(threatModel.content, /assets:/i);
+  } finally {
+    await ctx.stop();
+  }
+});

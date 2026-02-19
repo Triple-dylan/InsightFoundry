@@ -1,0 +1,48 @@
+version: 1
+updated_at: 2026-02-19
+system: InsightFoundry
+scope:
+  - multi_tenant_data_plane
+  - workspace_collaboration
+  - model_and_skill_orchestration
+  - channel_delivery_and_automation
+assets:
+  - id: tenant_data
+    description: Canonical facts, source records, metrics, and model outputs per tenant.
+  - id: secrets
+    description: Source credentials, BYO model keys, channel refs, MCP auth refs.
+  - id: audit_trail
+    description: Action, access, approval, model, and automation execution records.
+  - id: memory
+    description: Project and user memory records that can influence model and agent behavior.
+threats:
+  - id: T001
+    name: Cross-tenant data leakage
+    controls:
+      - tenant_id predicates on every read/write path
+      - tenant header enforcement and role checks
+      - integration tests for cross-tenant denial
+  - id: T002
+    name: Prompt/context leakage across users
+    controls:
+      - thread isolation modes
+      - private AI exchanges with non-content markers
+      - per-user memory stores
+  - id: T003
+    name: Unauthorized autonomous actions
+    controls:
+      - policy-gated autonomy defaults
+      - approval queue for high-impact and device command requests
+      - kill switch per tenant
+  - id: T004
+    name: Malicious skill manifest/tool escalation
+    controls:
+      - signed manifests
+      - tool allowlists and risk labels
+      - registry validation and integrity checks
+  - id: T005
+    name: Channel abuse or delivery misrouting
+    controls:
+      - channel credential readiness checks
+      - retry/backoff policy by channel
+      - idempotent event records and retry limits

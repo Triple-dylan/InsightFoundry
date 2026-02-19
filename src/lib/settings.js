@@ -5,6 +5,7 @@ function defaultGeneral(tenant) {
     name: tenant.name,
     timezone: "America/New_York",
     locale: "en-US",
+    onboardingMode: "quickstart",
     branding: {
       logoUrl: tenant.branding?.logoUrl ?? "",
       primary: tenant.branding?.theme?.primary ?? "#0c8f6b"
@@ -17,7 +18,10 @@ function defaultModelPreferences(tenant) {
     llmMode: tenant.modelConfig?.mode ?? "managed",
     defaultProvider: "managed",
     defaultProfileId: null,
-    byoKeyRefs: []
+    byoKeyRefs: [],
+    failoverChain: ["managed"],
+    providerCooldownMinutes: 10,
+    authProfiles: []
   };
 }
 
@@ -32,7 +36,12 @@ function defaultTraining(tenant) {
 function defaultChannels() {
   return {
     slack: { enabled: false, webhookRef: "", template: "Insight summary: {{summary}}" },
-    telegram: { enabled: false, botTokenRef: "", chatId: "", template: "Insight summary: {{summary}}" }
+    telegram: { enabled: false, botTokenRef: "", chatId: "", template: "Insight summary: {{summary}}" },
+    reliability: {
+      email: { maxAttempts: 2, baseDelayMs: 15000 },
+      slack: { maxAttempts: 3, baseDelayMs: 20000 },
+      telegram: { maxAttempts: 4, baseDelayMs: 30000 }
+    }
   };
 }
 
@@ -41,7 +50,9 @@ function defaultPolicies(tenant) {
     autonomyMode: tenant.autonomyPolicy?.autonomyMode ?? "policy-gated",
     confidenceThreshold: tenant.autonomyPolicy?.confidenceThreshold ?? 0.76,
     budgetGuardrailUsd: tenant.autonomyPolicy?.budgetGuardrailUsd ?? 10000,
-    killSwitch: Boolean(tenant.autonomyPolicy?.killSwitch)
+    killSwitch: Boolean(tenant.autonomyPolicy?.killSwitch),
+    securityAuditIntervalHours: 24,
+    doctorAutoRun: false
   };
 }
 
@@ -115,6 +126,18 @@ export function patchSettingsGeneral(state, tenant, payload) {
 export function patchSettingsModelPreferences(state, tenant, payload) {
   const settings = ensureTenantSettings(state, tenant);
   patch(settings.modelPreferences, payload);
+  tenant.modelConfig.mode = settings.modelPreferences.llmMode;
+  tenant.modelConfig.defaultProvider = settings.modelPreferences.defaultProvider;
+  tenant.modelConfig.failoverChain = Array.isArray(settings.modelPreferences.failoverChain)
+    ? settings.modelPreferences.failoverChain
+    : ["managed"];
+  tenant.modelConfig.providerCooldownMinutes = Number(settings.modelPreferences.providerCooldownMinutes ?? 10);
+  tenant.modelConfig.authProfiles = Array.isArray(settings.modelPreferences.authProfiles)
+    ? settings.modelPreferences.authProfiles
+    : [];
+  tenant.modelConfig.byoProviders = Array.isArray(settings.modelPreferences.byoKeyRefs)
+    ? settings.modelPreferences.byoKeyRefs.map((item) => String(item).split(":")[0]).filter(Boolean)
+    : tenant.modelConfig.byoProviders;
   settings.updatedAt = new Date().toISOString();
   return settings;
 }
@@ -134,6 +157,8 @@ export function patchSettingsPolicies(state, tenant, payload) {
   tenant.autonomyPolicy.confidenceThreshold = settings.policies.confidenceThreshold;
   tenant.autonomyPolicy.budgetGuardrailUsd = settings.policies.budgetGuardrailUsd;
   tenant.autonomyPolicy.killSwitch = settings.policies.killSwitch;
+  tenant.autonomyPolicy.securityAuditIntervalHours = Number(settings.policies.securityAuditIntervalHours ?? 24);
+  tenant.autonomyPolicy.doctorAutoRun = Boolean(settings.policies.doctorAutoRun);
   settings.updatedAt = new Date().toISOString();
   return settings;
 }

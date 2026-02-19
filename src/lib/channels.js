@@ -52,6 +52,20 @@ function readinessForChannel(state, tenantId, channel) {
   return { ready: true, reason: null };
 }
 
+function reliabilityForChannel(state, tenantId, channel) {
+  const settings = state.settingsByTenant.get(tenantId);
+  const defaults = {
+    email: { maxAttempts: 2, baseDelayMs: 15000 },
+    slack: { maxAttempts: 3, baseDelayMs: 20000 },
+    telegram: { maxAttempts: 4, baseDelayMs: 30000 }
+  };
+  const configured = settings?.channels?.reliability?.[channel] ?? defaults[channel] ?? { maxAttempts: 3, baseDelayMs: 20000 };
+  return {
+    maxAttempts: Math.max(1, Number(configured.maxAttempts ?? defaults[channel]?.maxAttempts ?? 3)),
+    baseDelayMs: Math.max(1000, Number(configured.baseDelayMs ?? defaults[channel]?.baseDelayMs ?? 20000))
+  };
+}
+
 export function previewReportDelivery(state, tenantId, channels, report, options = {}) {
   const templates = options.templates ?? {};
   const extraContext = options.context ?? {};
@@ -81,10 +95,14 @@ export function notifyReportDelivery(state, tenantId, channels, report, options 
   for (const preview of previews) {
     const priorAttempts = Number(options.attemptCount ?? 0);
     const attemptCount = priorAttempts + 1;
-    const maxAttempts = Number(options.maxAttempts ?? 3);
+    const reliability = reliabilityForChannel(state, tenantId, preview.channel);
+    const maxAttempts = Number(options.maxAttempts ?? reliability.maxAttempts);
     const delivered = preview.ready && !options.forceFailChannels?.includes(preview.channel);
     const status = delivered ? "delivered" : (attemptCount >= maxAttempts ? "failed_permanent" : "failed");
     const lastError = delivered ? null : (preview.reason ?? "delivery_failed");
+    const nextRetryAt = delivered || status === "failed_permanent"
+      ? null
+      : new Date(Date.now() + reliability.baseDelayMs * Math.max(1, attemptCount)).toISOString();
     outputs.push(
       deliverChannelEvent(state, {
         tenantId,
@@ -93,6 +111,8 @@ export function notifyReportDelivery(state, tenantId, channels, report, options 
         status,
         attemptCount,
         maxAttempts,
+        nextRetryAt,
+        retryPolicy: reliability,
         lastError,
         responseMetadata: {
           provider: preview.channel,
@@ -133,11 +153,17 @@ export function retryChannelEvent(state, tenantId, eventId, options = {}) {
     templates,
     context: options.context
   })[0];
+  const reliability = reliabilityForChannel(state, tenantId, event.channel);
   const nextAttempt = Number(event.attemptCount ?? 1) + 1;
-  const maxAttempts = Number(event.maxAttempts ?? 3);
+  const maxAttempts = Number(event.maxAttempts ?? reliability.maxAttempts);
   const delivered = preview.ready && !options.forceFailChannels?.includes(event.channel);
   event.status = delivered ? "delivered" : (nextAttempt >= maxAttempts ? "failed_permanent" : "failed");
   event.attemptCount = nextAttempt;
+  event.maxAttempts = maxAttempts;
+  event.nextRetryAt = delivered || event.status === "failed_permanent"
+    ? null
+    : new Date(Date.now() + reliability.baseDelayMs * Math.max(1, nextAttempt)).toISOString();
+  event.retryPolicy = reliability;
   event.lastError = delivered ? null : (preview.reason ?? "delivery_failed");
   event.responseMetadata = {
     provider: event.channel,

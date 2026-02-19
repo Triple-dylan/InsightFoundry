@@ -28,6 +28,9 @@ function serializeState(state) {
     workspaceAgentProfiles: state.workspaceAgentProfiles,
     chatMessages: state.chatMessages,
     notifications: state.notifications,
+    projectMemories: state.projectMemories,
+    userMemories: state.userMemories,
+    memorySnapshots: state.memorySnapshots,
     folderAutomations: state.folderAutomations,
     automationRuns: state.automationRuns,
     heartbeatState: state.heartbeatState,
@@ -37,6 +40,10 @@ function serializeState(state) {
     modelProfiles: state.modelProfiles,
     reportTypes: state.reportTypes,
     analysisRuns: state.analysisRuns,
+    modelProviderHealth: [...state.modelProviderHealth.entries()],
+    skillRegistry: state.skillRegistry,
+    securityAuditRuns: state.securityAuditRuns,
+    doctorRuns: state.doctorRuns,
     modelRuns: state.modelRuns,
     insights: state.insights,
     reports: state.reports,
@@ -74,6 +81,9 @@ function hydrateState(state, payload = {}) {
   state.workspaceAgentProfiles = payload.workspaceAgentProfiles ?? state.workspaceAgentProfiles;
   state.chatMessages = payload.chatMessages ?? state.chatMessages;
   state.notifications = payload.notifications ?? state.notifications;
+  state.projectMemories = payload.projectMemories ?? state.projectMemories;
+  state.userMemories = payload.userMemories ?? state.userMemories;
+  state.memorySnapshots = payload.memorySnapshots ?? state.memorySnapshots;
   state.folderAutomations = payload.folderAutomations ?? state.folderAutomations;
   state.automationRuns = payload.automationRuns ?? state.automationRuns;
   state.heartbeatState = payload.heartbeatState ?? state.heartbeatState;
@@ -83,6 +93,10 @@ function hydrateState(state, payload = {}) {
   state.modelProfiles = payload.modelProfiles ?? state.modelProfiles;
   state.reportTypes = payload.reportTypes ?? state.reportTypes;
   state.analysisRuns = payload.analysisRuns ?? state.analysisRuns;
+  state.modelProviderHealth = new Map(payload.modelProviderHealth ?? []);
+  state.skillRegistry = payload.skillRegistry ?? state.skillRegistry;
+  state.securityAuditRuns = payload.securityAuditRuns ?? state.securityAuditRuns;
+  state.doctorRuns = payload.doctorRuns ?? state.doctorRuns;
   state.modelRuns = payload.modelRuns ?? state.modelRuns;
   state.insights = payload.insights ?? state.insights;
   state.reports = payload.reports ?? state.reports;

@@ -84,6 +84,12 @@ const SKILL_CATALOG = [
   }
 ];
 
+const SOURCE_PRECEDENCE = {
+  workspace: 3,
+  local: 2,
+  bundled: 1
+};
+
 function manifestSignature(manifest) {
   const canonical = JSON.stringify(manifest, Object.keys(manifest).sort());
   return crypto.createHash("sha256").update(canonical).digest("hex");
@@ -91,6 +97,68 @@ function manifestSignature(manifest) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function precedenceForSource(source) {
+  return SOURCE_PRECEDENCE[String(source ?? "bundled")] ?? SOURCE_PRECEDENCE.bundled;
+}
+
+function registryEntryFromCatalog(item) {
+  return {
+    registryId: `bundled:${item.id}@${item.version}`,
+    id: item.id,
+    version: item.version,
+    source: "bundled",
+    riskLevel: "medium",
+    verified: true,
+    tags: ["built-in"],
+    manifest: clone(item),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+export function ensureSkillRegistry(state) {
+  if (!Array.isArray(state.skillRegistry)) {
+    state.skillRegistry = [];
+  }
+  for (const item of SKILL_CATALOG) {
+    const exists = state.skillRegistry.some(
+      (entry) => entry.id === item.id && entry.version === item.version && entry.source === "bundled"
+    );
+    if (!exists) {
+      state.skillRegistry.push(registryEntryFromCatalog(item));
+    }
+  }
+  return state.skillRegistry;
+}
+
+export function listSkillRegistry(state, options = {}) {
+  ensureSkillRegistry(state);
+  return state.skillRegistry
+    .filter((entry) => (options.source ? entry.source === options.source : true))
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+}
+
+export function registerSkillInRegistry(state, tenantId, payload = {}) {
+  ensureSkillRegistry(state);
+  const manifest = clone(payload.manifest ?? {});
+  validateSkillManifest(manifest);
+  const entry = {
+    registryId: newId("skill_registry"),
+    id: manifest.id,
+    version: manifest.version,
+    source: payload.source ?? "workspace",
+    riskLevel: payload.riskLevel ?? "medium",
+    verified: Boolean(payload.verified ?? false),
+    tags: Array.isArray(payload.tags) ? payload.tags.map((tag) => String(tag)) : [],
+    tenantScope: tenantId,
+    manifest,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  state.skillRegistry.push(entry);
+  return entry;
 }
 
 function isKnownToolId(toolId) {
@@ -120,12 +188,39 @@ export function validateSkillManifest(manifest) {
     throw err;
   }
 
+  if (!/^[a-z0-9-]{2,80}$/.test(String(manifest.id ?? ""))) {
+    const err = new Error("Skill id must match /^[a-z0-9-]{2,80}$/");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!/^\d+\.\d+\.\d+(-[a-z0-9.-]+)?$/i.test(String(manifest.version ?? ""))) {
+    const err = new Error("Skill version must be semver-like (x.y.z)");
+    err.statusCode = 400;
+    throw err;
+  }
+
   const unknownTool = manifest.tools.find((tool) => !tool?.id || !isKnownToolId(tool.id));
   if (unknownTool) {
     const err = new Error(`Skill manifest references unsupported tool '${unknownTool.id}'`);
     err.statusCode = 400;
     throw err;
   }
+
+  const riskLevel = String(manifest.riskLevel ?? "medium");
+  if (!["low", "medium", "high"].includes(riskLevel)) {
+    const err = new Error("Skill riskLevel must be one of: low, medium, high");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  manifest.riskLevel = riskLevel;
+  manifest.guardrails = {
+    ...manifest.guardrails,
+    tokenBudget: Number(manifest.guardrails?.tokenBudget ?? 2500),
+    timeBudgetMs: Number(manifest.guardrails?.timeBudgetMs ?? 8000),
+    contextTokenBudget: Number(manifest.guardrails?.contextTokenBudget ?? 1400)
+  };
 }
 
 function catalogSkillById(skillId) {
@@ -141,7 +236,23 @@ export function listSkillTools() {
 }
 
 export function installSkillPack(state, tenant, payload = {}) {
-  let manifest = payload.manifest ? clone(payload.manifest) : clone(catalogSkillById(payload.skillId));
+  ensureSkillRegistry(state);
+  let manifest = null;
+  let source = payload.source ?? "bundled";
+  let riskLevel = payload.riskLevel ?? "medium";
+  if (payload.registryId) {
+    const registryItem = state.skillRegistry.find((entry) => entry.registryId === payload.registryId);
+    if (!registryItem) {
+      const err = new Error(`Registry skill '${payload.registryId}' not found`);
+      err.statusCode = 404;
+      throw err;
+    }
+    manifest = clone(registryItem.manifest);
+    source = registryItem.source ?? source;
+    riskLevel = registryItem.riskLevel ?? riskLevel;
+  } else {
+    manifest = payload.manifest ? clone(payload.manifest) : clone(catalogSkillById(payload.skillId));
+  }
   if (!manifest) {
     const err = new Error(`Skill '${payload.skillId}' not found in catalog`);
     err.statusCode = 404;
@@ -158,6 +269,9 @@ export function installSkillPack(state, tenant, payload = {}) {
     version: manifest.version,
     tenantId: tenant.id,
     manifest,
+    source,
+    riskLevel,
+    precedence: precedenceForSource(source),
     signature,
     active: Boolean(payload.active ?? true),
     createdAt: new Date().toISOString(),
@@ -260,7 +374,9 @@ function classifySkill(installedSkills, payload = {}) {
   const intent = String(payload.intent ?? "").toLowerCase();
   const input = String(payload.input ?? "").toLowerCase();
 
-  const candidates = installedSkills.filter((item) => item.active);
+  const candidates = installedSkills
+    .filter((item) => item.active)
+    .sort((a, b) => Number(b.precedence ?? 0) - Number(a.precedence ?? 0));
   let best = null;
   let bestScore = -1;
 
@@ -328,6 +444,21 @@ function assertSkillSafety(tenant, skill, payload = {}) {
   }
   checks.push({ check: "token_budget", status: "pass", detail: `${tokenEstimate} within budget` });
 
+  const contextTokenEstimate = Number(payload.contextTokensEstimate ?? 0);
+  const contextBudget = Number(skill.manifest.guardrails.contextTokenBudget ?? 1400);
+  if (contextTokenEstimate > contextBudget) {
+    checks.push({
+      check: "context_token_budget",
+      status: "fail",
+      detail: `${contextTokenEstimate} exceeds ${contextBudget}`
+    });
+    const err = new Error("Skill context token budget exceeded");
+    err.statusCode = 400;
+    err.checks = checks;
+    throw err;
+  }
+  checks.push({ check: "context_token_budget", status: "pass", detail: `${contextTokenEstimate} within budget` });
+
   const timeoutMs = Number(payload.timeoutMs ?? 0);
   if (timeoutMs > Number(skill.manifest.guardrails.timeBudgetMs ?? 0)) {
     checks.push({
@@ -345,6 +476,7 @@ function assertSkillSafety(tenant, skill, payload = {}) {
 }
 
 export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
+  ensureSkillRegistry(state);
   const installed = listInstalledSkillPacks(state, tenant.id);
   const selected = classifySkill(installed, payload);
 
@@ -368,6 +500,13 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
   }
 
   const guardrailChecks = assertSkillSafety(tenant, selected, payload);
+
+  const runtimeEnv = Object.fromEntries(
+    Object.entries(payload.runtimeEnv ?? {})
+      .filter(([key]) => /^((SKILL|TENANT|MODEL)_|OPENAI_)/.test(String(key)))
+      .slice(0, 24)
+      .map(([key, value]) => [String(key), String(value).slice(0, 320)])
+  );
 
   const allowedTools = selected.manifest.tools.filter((tool) => tool.allow).map((tool) => tool.id);
   const requestedTools = (payload.requestedTools ?? []).length ? payload.requestedTools : allowedTools;
@@ -432,6 +571,8 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
       routing: {
         requestedSkillId: payload.skillId ?? null,
         selectedSkillId: selected.id,
+        selectedSkillSource: selected.source ?? "bundled",
+        selectedSkillRiskLevel: selected.riskLevel ?? selected.manifest?.riskLevel ?? "medium",
         channel: payload.channel ?? "web",
         intent: payload.intent ?? "unspecified"
       },
@@ -440,7 +581,11 @@ export function runSkillPack(state, tenant, payload = {}, adapters = {}) {
         allowed: allowedTools,
         deterministicExecuted: Object.keys(deterministicOutputs)
       },
-      guardrails: guardrailChecks
+      guardrails: guardrailChecks,
+      runtimeEnv: {
+        injected: Object.keys(runtimeEnv),
+        masked: true
+      }
     },
     reasoningHints: {
       deterministicFirst: true,

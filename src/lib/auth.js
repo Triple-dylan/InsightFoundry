@@ -2,7 +2,8 @@ export function authContextFromHeaders(headers) {
   return {
     tenantId: headers["x-tenant-id"] ?? "",
     userId: headers["x-user-id"] ?? "system",
-    role: headers["x-user-role"] ?? "analyst"
+    role: headers["x-user-role"] ?? "analyst",
+    channel: headers["x-channel-id"] ?? "web"
   };
 }
 

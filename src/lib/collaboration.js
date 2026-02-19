@@ -119,6 +119,9 @@ export function createWorkspaceThread(state, tenant, payload = {}) {
     folderId: folder.id,
     title: payload.title,
     summary: payload.summary ?? "",
+    contextMode: payload.contextMode === "per-user" || payload.contextMode === "per-channel-user"
+      ? payload.contextMode
+      : "shared",
     modelProfileId: payload.modelProfileId ?? null,
     createdBy: payload.createdBy ?? "system",
     createdAt: nowIso(),
@@ -127,6 +130,25 @@ export function createWorkspaceThread(state, tenant, payload = {}) {
   };
   state.workspaceThreads.push(thread);
   folder.updatedAt = nowIso();
+  return thread;
+}
+
+export function patchWorkspaceThread(state, tenantId, threadId, payload = {}) {
+  const thread = state.workspaceThreads.find((item) => item.tenantId === tenantId && item.id === threadId);
+  if (!thread) {
+    const err = new Error(`Workspace thread '${threadId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+  if (payload.title != null) thread.title = String(payload.title);
+  if (payload.summary != null) thread.summary = String(payload.summary);
+  if (payload.modelProfileId !== undefined) thread.modelProfileId = payload.modelProfileId ?? null;
+  if (payload.contextMode != null) {
+    thread.contextMode = payload.contextMode === "per-user" || payload.contextMode === "per-channel-user"
+      ? payload.contextMode
+      : "shared";
+  }
+  thread.updatedAt = nowIso();
   return thread;
 }
 

@@ -31,6 +31,9 @@ export function createAnalysisRun(state, tenant, payload = {}) {
     modelProfileId: payload.modelProfileId ?? null,
     reportTypeId: payload.reportTypeId ?? null,
     skillId: payload.skillId ?? null,
+    folderId: payload.folderId ?? null,
+    threadId: payload.threadId ?? null,
+    createdBy: payload.createdBy ?? "system",
     channels: payload.channels ?? ["email"],
     steps: baseSteps(),
     artifacts: {
@@ -114,6 +117,23 @@ export function executeAnalysisRun(state, tenant, run, adapters = {}, options = 
     }
     setStep(run, "source", "done", `Source ready (quality ${qualityScore.toFixed(2)})`);
 
+    const memoryContext = adapters.buildMemoryContext
+      ? adapters.buildMemoryContext(state, tenant.id, options.userId ?? "system", {
+          folderId: run.folderId ?? null,
+          threadId: run.threadId ?? null,
+          limit: 8
+        })
+      : { merged: [] };
+    if (adapters.snapshotMemoryContext) {
+      const snapshot = adapters.snapshotMemoryContext(state, tenant, options.userId ?? "system", {
+        folderId: run.folderId ?? null,
+        threadId: run.threadId ?? null,
+        limit: 8
+      });
+      run.memorySnapshotId = snapshot.snapshot.id;
+      run.timeline.push({ at: nowIso(), event: "memory_snapshot", detail: `Memory snapshot ${snapshot.snapshot.id}` });
+    }
+
     setStep(run, "model", "running", "Running selected model profile");
     const profile = adapters.requireModelProfile(state, tenant.id, run.modelProfileId);
     const model = adapters.runModelTask(state, tenant, {
@@ -134,6 +154,12 @@ export function executeAnalysisRun(state, tenant, run, adapters = {}, options = 
         channel: "web",
         requestedTools: ["model.run"],
         estimatedTokens: 1200,
+        contextTokensEstimate: (memoryContext.merged || []).reduce((sum, item) => sum + String(item.body || "").length / 4, 0),
+        runtimeEnv: {
+          TENANT_ID: tenant.id,
+          RUN_ID: run.id,
+          MEMORY_SNAPSHOT_ID: run.memorySnapshotId ?? ""
+        },
         timeoutMs: 3000
       }, {
         runModelTask: adapters.runModelTask,

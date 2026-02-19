@@ -2,15 +2,87 @@ import { newId } from "./state.js";
 import { queryMetric } from "./metrics.js";
 import { evaluateActionPolicy, canAutopilot } from "./policy.js";
 
-function chooseProvider(tenant, task) {
+function providerHealthKey(tenantId, provider) {
+  return `${tenantId}:${provider}`;
+}
+
+function providerHealthRecord(state, tenantId, provider) {
+  return state.modelProviderHealth.get(providerHealthKey(tenantId, provider)) ?? null;
+}
+
+function isProviderCoolingDown(state, tenantId, provider) {
+  const record = providerHealthRecord(state, tenantId, provider);
+  if (!record?.cooldownUntil) return false;
+  return Date.parse(record.cooldownUntil) > Date.now();
+}
+
+function markProviderFailure(state, tenantId, provider, cooldownMinutes, reason) {
+  const key = providerHealthKey(tenantId, provider);
+  const prev = state.modelProviderHealth.get(key) ?? {
+    tenantId,
+    provider,
+    failCount: 0,
+    successCount: 0,
+    lastError: null,
+    cooldownUntil: null
+  };
+  const failCount = Number(prev.failCount ?? 0) + 1;
+  const cooldown = new Date(Date.now() + Math.max(1, Number(cooldownMinutes ?? 10)) * 60_000).toISOString();
+  state.modelProviderHealth.set(key, {
+    ...prev,
+    failCount,
+    lastError: String(reason ?? "provider_failure"),
+    cooldownUntil: cooldown,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function markProviderSuccess(state, tenantId, provider) {
+  const key = providerHealthKey(tenantId, provider);
+  const prev = state.modelProviderHealth.get(key) ?? {
+    tenantId,
+    provider,
+    failCount: 0,
+    successCount: 0,
+    lastError: null,
+    cooldownUntil: null
+  };
+  state.modelProviderHealth.set(key, {
+    ...prev,
+    successCount: Number(prev.successCount ?? 0) + 1,
+    lastError: null,
+    cooldownUntil: null,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function resolveProviderChain(tenant, task) {
+  const chain = [];
+  const append = (value) => {
+    const provider = String(value ?? "").trim();
+    if (!provider) return;
+    if (!chain.includes(provider)) chain.push(provider);
+  };
   const byo = tenant.modelConfig?.byoProviders ?? [];
-  if (task.provider && (task.provider === "managed" || byo.includes(task.provider))) {
-    return task.provider;
+  if (task.provider) append(task.provider);
+  if (task.preferByo) {
+    byo.forEach(append);
   }
-  if (byo.length > 0 && task.preferByo) {
-    return byo[0];
-  }
-  return "managed";
+  append(tenant.modelConfig?.defaultProvider);
+  const configuredChain = Array.isArray(tenant.modelConfig?.failoverChain) ? tenant.modelConfig.failoverChain : [];
+  configuredChain.forEach(append);
+  append("managed");
+  return chain;
+}
+
+function chooseProvider(state, tenant, task) {
+  const chain = resolveProviderChain(tenant, task);
+  const available = chain.find((provider) => !isProviderCoolingDown(state, tenant.id, provider));
+  return {
+    selected: available ?? "managed",
+    chain,
+    skippedCooldown: chain.filter((provider) => isProviderCoolingDown(state, tenant.id, provider))
+  };
 }
 
 function linearForecast(series, horizon = 7) {
@@ -85,7 +157,38 @@ export function runModelTask(state, tenant, task) {
     qualityWarnings.push("insufficient_history_for_reliable_modeling");
   }
 
-  const provider = chooseProvider(tenant, task);
+  const cooldownMinutes = Number(tenant.modelConfig?.providerCooldownMinutes ?? 10);
+  const providerSelection = chooseProvider(state, tenant, task);
+  const failoverTrace = [];
+  const simulatedFailures = new Set((task.simulateProviderFailures ?? []).map((entry) => String(entry)));
+  let provider = providerSelection.selected;
+  let providerResolved = false;
+  for (const candidate of providerSelection.chain) {
+    if (isProviderCoolingDown(state, tenant.id, candidate)) {
+      failoverTrace.push({ provider: candidate, outcome: "skipped_cooldown" });
+      continue;
+    }
+    const shouldFail = simulatedFailures.has(candidate) || String(candidate).includes("down");
+    if (shouldFail) {
+      failoverTrace.push({ provider: candidate, outcome: "failed", reason: "simulated_provider_failure" });
+      markProviderFailure(state, tenant.id, candidate, cooldownMinutes, "simulated_provider_failure");
+      continue;
+    }
+    provider = candidate;
+    providerResolved = true;
+    failoverTrace.push({ provider: candidate, outcome: "selected" });
+    markProviderSuccess(state, tenant.id, candidate);
+    break;
+  }
+  if (!providerResolved) {
+    provider = "managed";
+    failoverTrace.push({ provider: "managed", outcome: "forced_fallback" });
+    markProviderSuccess(state, tenant.id, "managed");
+    qualityWarnings.push("provider_failover_exhausted_using_managed");
+  } else if (failoverTrace.some((entry) => entry.outcome === "failed" || entry.outcome === "skipped_cooldown")) {
+    qualityWarnings.push("provider_failover_used");
+  }
+
   const forecast = linearForecast(points, Number(task.horizonDays ?? 7));
   const anomalies = task.objective === "anomaly" ? detectAnomalies(points) : [];
 
@@ -132,6 +235,11 @@ export function runModelTask(state, tenant, task) {
     tenantId: tenant.id,
     objective: task.objective,
     provider,
+    providerTrace: {
+      chain: providerSelection.chain,
+      skippedCooldown: providerSelection.skippedCooldown,
+      failoverTrace
+    },
     metricId,
     status: qualityWarnings.length ? "completed_with_warnings" : "completed",
     createdAt: new Date().toISOString(),
