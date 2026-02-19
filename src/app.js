@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createState, createTenant, requireTenant } from "./lib/state.js";
 import { runConnectorSync } from "./lib/connectors.js";
@@ -155,6 +156,7 @@ import { createPersistence, loadStateFromPersistence, saveStateToPersistence } f
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_PATH = path.join(__dirname, "public", "index.html");
+const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN ?? "";
 
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -192,9 +194,27 @@ function respondJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
-function respondHtml(res, html) {
-  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+function respondHtml(res, html, statusCode = 200) {
+  res.writeHead(statusCode, { "content-type": "text/html; charset=utf-8" });
   res.end(html);
+}
+
+function applyCors(req, res) {
+  if (!ALLOW_ORIGIN) {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+    }
+    return;
+  }
+  res.setHeader("access-control-allow-origin", ALLOW_ORIGIN);
+  res.setHeader("access-control-allow-methods", "GET,POST,PATCH,OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type,x-tenant-id,x-user-id,x-user-role,x-channel-id");
+  res.setHeader("vary", "origin");
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+  }
 }
 
 function pathMatcher(pathname, pattern) {
@@ -254,6 +274,7 @@ function demoSeed(state) {
 export async function createPlatform({ seedDemo = true, startBackground = true } = {}) {
   const state = createState();
   const persistence = await createPersistence();
+  const startedAt = new Date().toISOString();
   const hydrated = await loadStateFromPersistence(state, persistence);
   let demoTenant = null;
   if (seedDemo && !hydrated && state.tenants.size === 0) {
@@ -351,6 +372,10 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
     : null;
 
   const server = http.createServer(async (req, res) => {
+    const requestId = crypto.randomUUID();
+    res.setHeader("x-request-id", requestId);
+    applyCors(req, res);
+    if (req.method === "OPTIONS") return;
     try {
       const method = req.method ?? "GET";
       const base = new URL(req.url ?? "/", "http://localhost");
@@ -364,7 +389,14 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       }
 
       if (method === "GET" && pathname === "/healthz") {
-        respondJson(res, 200, { ok: true, uptimeSec: process.uptime() });
+        respondJson(res, 200, {
+          ok: true,
+          uptimeSec: process.uptime(),
+          startedAt,
+          persistence: persistence.kind ?? "unknown",
+          tenants: state.tenants.size,
+          version: process.env.APP_VERSION ?? process.env.npm_package_version ?? "0.1.0"
+        });
         return;
       }
 
@@ -2339,6 +2371,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       respondJson(res, statusCode, {
         error: error.message,
         statusCode,
+        requestId,
         checks: error.checks,
         details: error.details
       });

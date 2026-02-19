@@ -115,6 +115,9 @@ function hydrateState(state, payload = {}) {
 }
 
 class InMemoryPersistence {
+  constructor() {
+    this.kind = "memory";
+  }
   async init() {}
   async load() { return null; }
   async save() {}
@@ -122,6 +125,7 @@ class InMemoryPersistence {
 
 class FilePersistence {
   constructor(snapshotPath) {
+    this.kind = "file";
     this.snapshotPath = snapshotPath;
   }
 
@@ -142,6 +146,7 @@ class FilePersistence {
 
 class PostgresPersistence {
   constructor(databaseUrl) {
+    this.kind = "postgres";
     this.databaseUrl = databaseUrl;
     this.client = null;
   }
