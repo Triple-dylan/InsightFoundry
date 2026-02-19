@@ -27,6 +27,15 @@ function serializeState(state) {
     workspaceComments: state.workspaceComments,
     workspaceAgentProfiles: state.workspaceAgentProfiles,
     chatMessages: state.chatMessages,
+    messageReactions: state.messageReactions,
+    realtimeEvents: state.realtimeEvents,
+    workspaceAttachments: state.workspaceAttachments,
+    workspaceDocAuth: state.workspaceDocAuth,
+    workspaceDocAuthStates: state.workspaceDocAuthStates,
+    workspaceDocFiles: state.workspaceDocFiles,
+    workspaceDocSessions: state.workspaceDocSessions,
+    workspaceTables: state.workspaceTables,
+    workspaceTableRows: state.workspaceTableRows,
     notifications: state.notifications,
     projectMemories: state.projectMemories,
     userMemories: state.userMemories,
@@ -39,6 +48,7 @@ function serializeState(state) {
     skillRuns: state.skillRuns,
     modelProfiles: state.modelProfiles,
     reportTypes: state.reportTypes,
+    reportTemplates: state.reportTemplates,
     analysisRuns: state.analysisRuns,
     modelProviderHealth: [...state.modelProviderHealth.entries()],
     skillRegistry: state.skillRegistry,
@@ -80,6 +90,15 @@ function hydrateState(state, payload = {}) {
   state.workspaceComments = payload.workspaceComments ?? state.workspaceComments;
   state.workspaceAgentProfiles = payload.workspaceAgentProfiles ?? state.workspaceAgentProfiles;
   state.chatMessages = payload.chatMessages ?? state.chatMessages;
+  state.messageReactions = payload.messageReactions ?? state.messageReactions;
+  state.realtimeEvents = payload.realtimeEvents ?? state.realtimeEvents;
+  state.workspaceAttachments = payload.workspaceAttachments ?? state.workspaceAttachments;
+  state.workspaceDocAuth = payload.workspaceDocAuth ?? state.workspaceDocAuth;
+  state.workspaceDocAuthStates = payload.workspaceDocAuthStates ?? state.workspaceDocAuthStates;
+  state.workspaceDocFiles = payload.workspaceDocFiles ?? state.workspaceDocFiles;
+  state.workspaceDocSessions = payload.workspaceDocSessions ?? state.workspaceDocSessions;
+  state.workspaceTables = payload.workspaceTables ?? state.workspaceTables;
+  state.workspaceTableRows = payload.workspaceTableRows ?? state.workspaceTableRows;
   state.notifications = payload.notifications ?? state.notifications;
   state.projectMemories = payload.projectMemories ?? state.projectMemories;
   state.userMemories = payload.userMemories ?? state.userMemories;
@@ -92,6 +111,7 @@ function hydrateState(state, payload = {}) {
   state.skillRuns = payload.skillRuns ?? state.skillRuns;
   state.modelProfiles = payload.modelProfiles ?? state.modelProfiles;
   state.reportTypes = payload.reportTypes ?? state.reportTypes;
+  state.reportTemplates = payload.reportTemplates ?? state.reportTemplates;
   state.analysisRuns = payload.analysisRuns ?? state.analysisRuns;
   state.modelProviderHealth = new Map(payload.modelProviderHealth ?? []);
   state.skillRegistry = payload.skillRegistry ?? state.skillRegistry;

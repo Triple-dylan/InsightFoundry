@@ -1065,7 +1065,7 @@ test("workspace agent settings and member appearance are configurable", async ()
     });
     assert.equal(getAgentRes.status, 200);
     const getAgentBody = await getAgentRes.json();
-    assert.equal(getAgentBody.profile.name, "InsightFoundry Agent");
+    assert.equal(getAgentBody.profile.name, "Titus");
 
     const patchAgentRes = await fetch(`${ctx.baseUrl}/v1/settings/workspace-agent`, {
       method: "PATCH",

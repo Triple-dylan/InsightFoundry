@@ -46,6 +46,7 @@ import {
   getMiniThread,
   createAiReplyForMessage,
   listThreadAttachments,
+  listFolderAttachments,
   listNotifications,
   markNotificationRead,
   getWorkspaceAgentProfile,
@@ -152,6 +153,44 @@ import {
   executeAnalysisRun,
   deliverAnalysisRun
 } from "./lib/analysis-runs.js";
+import {
+  createRealtimeHub,
+  issueRealtimeToken,
+  handleRealtimeUpgrade,
+  publishRealtimeEvent,
+  listRealtimeEvents
+} from "./lib/realtime.js";
+import {
+  addMessageReaction,
+  removeMessageReaction,
+  listMessageReactions
+} from "./lib/reactions.js";
+import {
+  startGoogleWorkspaceAuth,
+  completeGoogleWorkspaceAuth,
+  listWorkspaceDocFiles,
+  openWorkspaceDocFile,
+  linkWorkspaceDocToThread
+} from "./lib/workspace-docs.js";
+import {
+  listWorkspaceTables,
+  createWorkspaceTable,
+  requireWorkspaceTable,
+  patchWorkspaceTable,
+  listWorkspaceTableRows,
+  addWorkspaceTableRows,
+  importLiveQueryToWorkspaceTable
+} from "./lib/workspace-tables.js";
+import {
+  listReportTemplates,
+  uploadReportTemplate,
+  patchReportTemplate,
+  activateReportTemplate,
+  previewReportTemplate,
+  requireReportTemplate,
+  resolveActiveTemplate,
+  compileReportTemplateBody
+} from "./lib/report-templates.js";
 import { createPersistence, loadStateFromPersistence, saveStateToPersistence } from "./lib/persistence.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -187,6 +226,247 @@ function parseJsonBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+function parseRawBody(req, limitBytes = 8 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limitBytes) {
+        const err = new Error("Request body too large");
+        err.statusCode = 413;
+        reject(err);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function parseMultipartForm(req) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const contentType = String(req.headers["content-type"] ?? "");
+      const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+      if (!boundaryMatch) {
+        const err = new Error("Missing multipart boundary");
+        err.statusCode = 400;
+        reject(err);
+        return;
+      }
+      const boundary = boundaryMatch[1] || boundaryMatch[2];
+      const body = await parseRawBody(req, 8 * 1024 * 1024);
+      const marker = `--${boundary}`;
+      const raw = body.toString("latin1");
+      const blocks = raw.split(marker).slice(1, -1);
+      const fields = {};
+      let file = null;
+
+      for (const block of blocks) {
+        const trimmed = block.replace(/^\r\n/, "").replace(/\r\n$/, "");
+        if (!trimmed) continue;
+        const splitIndex = trimmed.indexOf("\r\n\r\n");
+        if (splitIndex < 0) continue;
+        const headerRaw = trimmed.slice(0, splitIndex);
+        const contentRaw = trimmed.slice(splitIndex + 4).replace(/\r\n$/, "");
+        const headers = {};
+        for (const line of headerRaw.split("\r\n")) {
+          const idx = line.indexOf(":");
+          if (idx < 0) continue;
+          const key = line.slice(0, idx).trim().toLowerCase();
+          const value = line.slice(idx + 1).trim();
+          headers[key] = value;
+        }
+        const disposition = headers["content-disposition"] || "";
+        const nameMatch = disposition.match(/name="([^"]+)"/i);
+        const fileMatch = disposition.match(/filename="([^"]*)"/i);
+        const fieldName = nameMatch?.[1];
+        if (!fieldName) continue;
+
+        if (fileMatch && file == null) {
+          const filename = fileMatch[1] || "upload.bin";
+          const mimeType = headers["content-type"] || "application/octet-stream";
+          const binary = Buffer.from(contentRaw, "latin1");
+          file = {
+            fieldName,
+            filename,
+            mimeType,
+            size: binary.length,
+            data: binary
+          };
+          continue;
+        }
+
+        fields[fieldName] = Buffer.from(contentRaw, "latin1").toString("utf8");
+      }
+
+      resolve({ fields, file });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function sanitizeAttachmentName(value = "") {
+  const normalized = String(value).replaceAll("\\", "/").split("/").pop() ?? "file";
+  const clean = normalized.trim().replace(/[^\w.\- ()]/g, "_").slice(0, 240);
+  return clean || "file";
+}
+
+function buildAttachmentAsset(state, tenantId, userId, payload = {}) {
+  const name = sanitizeAttachmentName(payload.name ?? payload.filename ?? "file");
+  const mimeType = String(payload.mimeType ?? payload.type ?? "application/octet-stream").slice(0, 140);
+  const rawBuffer = Buffer.isBuffer(payload.data)
+    ? payload.data
+    : payload.contentBase64
+      ? Buffer.from(String(payload.contentBase64), "base64")
+      : Buffer.alloc(0);
+  const size = Number(payload.size ?? rawBuffer.length ?? 0);
+  if (size > 2 * 1024 * 1024) {
+    const err = new Error("Attachment exceeds 2MB limit");
+    err.statusCode = 413;
+    throw err;
+  }
+  const previewable = /^text\/|^application\/json$|^application\/pdf$|^image\//i.test(mimeType) && rawBuffer.length > 0;
+  const contentBase64 = rawBuffer.length ? rawBuffer.toString("base64") : "";
+  const createdAt = new Date().toISOString();
+  const id = `asset_${crypto.randomUUID()}`;
+  const asset = {
+    id,
+    tenantId,
+    name,
+    mimeType,
+    size,
+    previewable,
+    contentBase64,
+    createdBy: userId,
+    createdAt
+  };
+  state.workspaceAttachments.push(asset);
+  return asset;
+}
+
+function requireAttachmentAsset(state, tenantId, attachmentId) {
+  const asset = state.workspaceAttachments.find((item) => item.tenantId === tenantId && item.id === attachmentId);
+  if (!asset) {
+    const err = new Error(`Attachment '${attachmentId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return asset;
+}
+
+function attachmentAssetView(asset) {
+  let preview = null;
+  if (asset.previewable && asset.contentBase64) {
+    if (asset.mimeType.startsWith("text/") || asset.mimeType === "application/json") {
+      preview = {
+        kind: "text",
+        text: Buffer.from(asset.contentBase64, "base64").toString("utf8").slice(0, 20000)
+      };
+    } else {
+      preview = {
+        kind: "dataUrl",
+        dataUrl: `data:${asset.mimeType};base64,${asset.contentBase64}`
+      };
+    }
+  }
+  return {
+    attachment: {
+      id: asset.id,
+      tenantId: asset.tenantId,
+      name: asset.name,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      previewable: asset.previewable,
+      createdBy: asset.createdBy,
+      createdAt: asset.createdAt
+    },
+    refs: {
+      previewUrl: `/v1/workspace/attachments/${encodeURIComponent(asset.id)}`,
+      downloadUrl: `/v1/workspace/attachments/${encodeURIComponent(asset.id)}`
+    },
+    preview
+  };
+}
+
+function mergeMessageAttachments(state, tenantId, attachments, attachmentIds) {
+  const merged = [];
+  if (Array.isArray(attachments)) {
+    merged.push(...attachments);
+  }
+  if (Array.isArray(attachmentIds)) {
+    for (const rawId of attachmentIds) {
+      const attachmentId = String(rawId ?? "").trim();
+      if (!attachmentId) continue;
+      const asset = requireAttachmentAsset(state, tenantId, attachmentId);
+      merged.push({
+        id: attachmentId,
+        attachmentId,
+        name: asset.name,
+        type: asset.mimeType,
+        mimeType: asset.mimeType,
+        size: asset.size,
+        previewable: asset.previewable,
+        previewUrl: `/v1/workspace/attachments/${encodeURIComponent(asset.id)}`
+      });
+    }
+  }
+  const dedup = new Map();
+  for (const item of merged) {
+    const key = String(item?.attachmentId ?? item?.id ?? "");
+    if (!key) continue;
+    dedup.set(key, item);
+  }
+  return [...dedup.values()];
+}
+
+function parseMentionTokens(body = "") {
+  return [...String(body).matchAll(/@([a-zA-Z0-9._-]{2,64})/g)]
+    .map((match) => String(match[1] || "").toLowerCase());
+}
+
+function shouldInvokeAiForMessage(messageBody, invokeAiMode, agentProfile) {
+  if (invokeAiMode === "explicit") return true;
+  if (invokeAiMode === "none") return false;
+  const tokens = parseMentionTokens(messageBody);
+  const aliases = new Set(
+    [
+      String(agentProfile?.name ?? "titus").toLowerCase().replaceAll(/\s+/g, ""),
+      ...(Array.isArray(agentProfile?.mentionAliases) ? agentProfile.mentionAliases : [])
+    ]
+      .map((item) => String(item || "").toLowerCase().replaceAll(/\s+/g, ""))
+      .filter(Boolean)
+  );
+  return tokens.some((token) => aliases.has(token.replaceAll(/\s+/g, "")));
+}
+
+function buildOnboardingState(state, tenant) {
+  const settings = ensureTenantSettings(state, tenant);
+  const checklist = settings.checklist ?? {};
+  const hasConnections = Boolean(checklist.connectionsConfigured);
+  const hasProvider = Boolean(settings.modelPreferences?.defaultProvider);
+  const hasProfiles = Boolean(checklist.modelProfileConfigured);
+  const hasRuns = state.analysisRuns.some((run) => run.tenantId === tenant.id && run.status === "completed");
+  const hasDeliveries = state.channelEvents.some((event) => event.tenantId === tenant.id);
+  const steps = [
+    { id: "connect_source", title: "Connect data source", status: hasConnections ? "done" : "pending", actionId: "connect_source" },
+    { id: "configure_llm", title: "Configure LLM model", status: hasProvider ? "done" : "pending", actionId: "configure_llm" },
+    { id: "choose_profile", title: "Choose analysis profile", status: hasProfiles ? "done" : "pending", actionId: "choose_profile" },
+    { id: "run_first_analysis", title: "Run first analysis", status: hasRuns ? "done" : "pending", actionId: "run_first_analysis" },
+    { id: "deliver_report", title: "Deliver report", status: hasDeliveries ? "done" : "pending", actionId: "deliver_report" }
+  ];
+  const next = steps.find((step) => step.status === "pending") ?? null;
+  return {
+    tenantId: tenant.id,
+    completed: Boolean(!next),
+    steps,
+    nextActionId: next?.actionId ?? null
+  };
 }
 
 function respondJson(res, statusCode, payload) {
@@ -371,6 +651,9 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       }, 60_000)
     : null;
 
+  const realtimeHub = createRealtimeHub();
+  const emitRealtime = (payload) => publishRealtimeEvent(state, realtimeHub, payload);
+
   const server = http.createServer(async (req, res) => {
     const requestId = crypto.randomUUID();
     res.setHeader("x-request-id", requestId);
@@ -402,6 +685,34 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
 
       if (method === "GET" && pathname === "/v1/feature-flags") {
         respondJson(res, 200, { flags: state.featureFlags });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/realtime/token") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const token = issueRealtimeToken(ctx.tenantId, ctx.userId, ctx.channel);
+        respondJson(res, 200, {
+          token,
+          wsPath: `/v1/realtime/ws?token=${encodeURIComponent(token)}`,
+          expiresInSec: 1800
+        });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/realtime/ws") {
+        respondJson(res, 426, { error: "Use WebSocket upgrade for /v1/realtime/ws" });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/realtime/events") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const since = base.searchParams.get("since") ?? undefined;
+        const events = listRealtimeEvents(state, ctx.tenantId, since);
+        respondJson(res, 200, { events });
         return;
       }
 
@@ -637,6 +948,42 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      if (method === "GET" && pathname === "/v1/integrations/google/workspace/auth/start") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const auth = startGoogleWorkspaceAuth(state, ctx.tenantId, ctx.userId);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "google_workspace_auth_started",
+          details: { oauthState: auth.oauthState }
+        });
+        await persistState();
+        respondJson(res, 200, auth);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/integrations/google/workspace/auth/callback") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const auth = completeGoogleWorkspaceAuth(state, ctx.tenantId, ctx.userId, {
+          state: base.searchParams.get("state"),
+          code: base.searchParams.get("code")
+        });
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "google_workspace_auth_completed",
+          details: { authId: auth.id }
+        });
+        await persistState();
+        respondJson(res, 200, { auth });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/settings/team") {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
@@ -864,6 +1211,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
         const body = await parseJsonBody(req);
+        const messageAttachments = mergeMessageAttachments(state, ctx.tenantId, body.attachments, body.attachmentIds);
         const message = createChatMessage(state, tenant, {
           threadId: workspaceChatMessagesMatch.threadId,
           folderId: body.folderId,
@@ -871,18 +1219,54 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           visibility: body.visibility,
           privateRecipientUserId: body.privateRecipientUserId,
           body: body.body,
-          attachments: body.attachments,
+          attachments: messageAttachments,
           channel: ctx.channel,
           authorType: body.authorType ?? "user",
           authorId: body.authorId ?? ctx.userId,
           authorName: body.authorName ?? ctx.userId
         }, ctx);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: message.threadId,
+          type: "chat.message_created",
+          payload: {
+            messageId: message.id,
+            authorId: message.authorId,
+            visibility: message.visibility
+          }
+        });
         const memoryCapture = ingestRememberCommand(state, tenant, ctx.userId, {
           body: body.body,
           folderId: message.folderId,
           threadId: message.threadId,
           tags: body.tags
         });
+        let aiMessage = null;
+        const invokeAiMode = String(body.invokeAiMode ?? "none");
+        const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
+        const invokeAi = shouldInvokeAiForMessage(body.body, invokeAiMode, agentProfile);
+        if (invokeAi && message.visibility === "shared") {
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: message.threadId,
+            type: "chat.ai_working",
+            payload: { messageId: message.id, agentName: agentProfile.name }
+          });
+          aiMessage = createAiReplyForMessage(state, tenant, {
+            threadId: message.threadId,
+            messageId: message.id,
+            visibility: body.aiVisibility ?? "shared",
+            responseText: body.aiResponseText,
+            attachments: [],
+            authorName: agentProfile.name
+          }, ctx);
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: message.threadId,
+            type: "chat.ai_reply_created",
+            payload: { parentMessageId: message.id, aiMessageId: aiMessage.id, visibility: aiMessage.visibility }
+          });
+        }
         pushAudit(state, {
           tenantId: tenant.id,
           actorId: ctx.userId,
@@ -891,11 +1275,12 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
             threadId: workspaceChatMessagesMatch.threadId,
             messageId: message.id,
             visibility: message.visibility,
-            memoryCaptured: Boolean(memoryCapture)
+            memoryCaptured: Boolean(memoryCapture),
+            invokeAi
           }
         });
         await persistState();
-        respondJson(res, 201, { message, memoryCapture });
+        respondJson(res, 201, { message, memoryCapture, aiMessage });
         return;
       }
 
@@ -907,13 +1292,26 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
         const body = await parseJsonBody(req);
+        const aiAttachments = mergeMessageAttachments(state, ctx.tenantId, body.attachments, body.attachmentIds);
+        const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
         const message = createAiReplyForMessage(state, tenant, {
           threadId: workspaceChatAiMatch.threadId,
           messageId: workspaceChatAiMatch.messageId,
           visibility: body.visibility,
           responseText: body.responseText,
-          attachments: body.attachments
+          attachments: aiAttachments,
+          authorName: agentProfile.name
         }, ctx);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: workspaceChatAiMatch.threadId,
+          type: "chat.ai_reply_created",
+          payload: {
+            parentMessageId: workspaceChatAiMatch.messageId,
+            aiMessageId: message.id,
+            visibility: message.visibility
+          }
+        });
         pushAudit(state, {
           tenantId: tenant.id,
           actorId: ctx.userId,
@@ -955,18 +1353,30 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
         const body = await parseJsonBody(req);
+        const replyAttachments = mergeMessageAttachments(state, ctx.tenantId, body.attachments, body.attachmentIds);
         const reply = createChatMessage(state, tenant, {
           threadId: workspaceChatRepliesMatch.threadId,
           parentMessageId: workspaceChatRepliesMatch.messageId,
           visibility: body.visibility,
           privateRecipientUserId: body.privateRecipientUserId,
           body: body.body,
-          attachments: body.attachments,
+          attachments: replyAttachments,
           channel: ctx.channel,
           authorType: body.authorType ?? "user",
           authorId: body.authorId ?? ctx.userId,
           authorName: body.authorName ?? ctx.userId
         }, ctx);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: reply.threadId,
+          type: "chat.reply_created",
+          payload: {
+            messageId: reply.id,
+            parentMessageId: workspaceChatRepliesMatch.messageId,
+            authorId: reply.authorId,
+            visibility: reply.visibility
+          }
+        });
         pushAudit(state, {
           tenantId: tenant.id,
           actorId: ctx.userId,
@@ -996,6 +1406,83 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      const messageReactionsMatch = pathMatcher(pathname, "/v1/workspace/chat/messages/:messageId/reactions");
+      if (method === "GET" && messageReactionsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const reactions = listMessageReactions(state, ctx.tenantId, messageReactionsMatch.messageId, ctx.userId);
+        respondJson(res, 200, { reactions });
+        return;
+      }
+
+      if (method === "POST" && messageReactionsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const reaction = addMessageReaction(state, tenant.id, messageReactionsMatch.messageId, ctx.userId, body.emoji);
+        const message = state.chatMessages.find((item) => item.tenantId === tenant.id && item.id === messageReactionsMatch.messageId);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: message?.threadId,
+          type: "chat.reaction_added",
+          payload: {
+            messageId: messageReactionsMatch.messageId,
+            reactionId: reaction.id,
+            emoji: reaction.emoji,
+            userId: reaction.userId
+          }
+        });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_reaction_added",
+          details: { messageId: messageReactionsMatch.messageId, reactionId: reaction.id, emoji: reaction.emoji }
+        });
+        await persistState();
+        respondJson(res, 201, { reaction, reactions: listMessageReactions(state, tenant.id, messageReactionsMatch.messageId, ctx.userId) });
+        return;
+      }
+
+      const messageReactionDeleteMatch = pathMatcher(pathname, "/v1/workspace/chat/messages/:messageId/reactions/:reactionId");
+      if (method === "DELETE" && messageReactionDeleteMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const removed = removeMessageReaction(
+          state,
+          tenant.id,
+          messageReactionDeleteMatch.messageId,
+          messageReactionDeleteMatch.reactionId,
+          ctx.userId,
+          ctx.userRole
+        );
+        const message = state.chatMessages.find((item) => item.tenantId === tenant.id && item.id === messageReactionDeleteMatch.messageId);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: message?.threadId,
+          type: "chat.reaction_removed",
+          payload: {
+            messageId: messageReactionDeleteMatch.messageId,
+            reactionId: removed.id,
+            emoji: removed.emoji,
+            userId: removed.userId
+          }
+        });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_reaction_removed",
+          details: { messageId: messageReactionDeleteMatch.messageId, reactionId: removed.id, emoji: removed.emoji }
+        });
+        await persistState();
+        respondJson(res, 200, { removed, reactions: listMessageReactions(state, tenant.id, messageReactionDeleteMatch.messageId, ctx.userId) });
+        return;
+      }
+
       const workspaceAttachmentsMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/attachments");
       if (method === "GET" && workspaceAttachmentsMatch) {
         const ctx = authContextFromHeaders(req.headers);
@@ -1004,6 +1491,396 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         ensureWorkspaceCoreDefaults(state, tenant);
         const attachments = listThreadAttachments(state, ctx.tenantId, workspaceAttachmentsMatch.threadId, ctx.userId, ctx.channel);
         respondJson(res, 200, { attachments });
+        return;
+      }
+
+      const workspaceFolderAttachmentsMatch = pathMatcher(pathname, "/v1/workspace/folders/:folderId/attachments");
+      if (method === "GET" && workspaceFolderAttachmentsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        let attachments = [];
+        try {
+          attachments = listFolderAttachments(
+            state,
+            ctx.tenantId,
+            workspaceFolderAttachmentsMatch.folderId,
+            ctx.userId,
+            ctx.channel
+          );
+        } catch (error) {
+          if (error?.statusCode !== 404) throw error;
+        }
+        respondJson(res, 200, { attachments });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/docs/files") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const q = base.searchParams.get("q") ?? "";
+        const files = listWorkspaceDocFiles(state, ctx.tenantId, { q });
+        respondJson(res, 200, { files });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/docs/open") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const opened = openWorkspaceDocFile(state, ctx.tenantId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_doc_opened",
+          details: { fileId: opened.file.id, sessionId: opened.session.id }
+        });
+        await persistState();
+        respondJson(res, 200, opened);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/docs/link-thread") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const file = linkWorkspaceDocToThread(state, ctx.tenantId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_doc_linked_thread",
+          details: { fileId: file.id, threadId: body.threadId }
+        });
+        await persistState();
+        respondJson(res, 200, { file });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/tables") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const tables = listWorkspaceTables(state, ctx.tenantId);
+        respondJson(res, 200, { tables });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/tables") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const table = createWorkspaceTable(state, tenant, { ...body, createdBy: ctx.userId });
+        if (Array.isArray(body.rows) && body.rows.length) {
+          addWorkspaceTableRows(state, tenant.id, table.id, body.rows, ctx.userId);
+        }
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_table_created",
+          details: { tableId: table.id }
+        });
+        await persistState();
+        respondJson(res, 201, { table, rows: listWorkspaceTableRows(state, tenant.id, table.id) });
+        return;
+      }
+
+      const workspaceTableMatch = pathMatcher(pathname, "/v1/workspace/tables/:tableId");
+      if (method === "GET" && workspaceTableMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const table = requireWorkspaceTable(state, ctx.tenantId, workspaceTableMatch.tableId);
+        const rows = listWorkspaceTableRows(state, ctx.tenantId, table.id);
+        respondJson(res, 200, { table, rows });
+        return;
+      }
+
+      if (method === "PATCH" && workspaceTableMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const table = patchWorkspaceTable(state, ctx.tenantId, workspaceTableMatch.tableId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_table_updated",
+          details: { tableId: table.id }
+        });
+        await persistState();
+        respondJson(res, 200, { table, rows: listWorkspaceTableRows(state, ctx.tenantId, table.id) });
+        return;
+      }
+
+      const workspaceTableRowsMatch = pathMatcher(pathname, "/v1/workspace/tables/:tableId/rows");
+      if (method === "POST" && workspaceTableRowsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const rows = addWorkspaceTableRows(
+          state,
+          ctx.tenantId,
+          workspaceTableRowsMatch.tableId,
+          Array.isArray(body.rows) ? body.rows : [body.row || {}],
+          ctx.userId
+        );
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_table_rows_added",
+          details: { tableId: workspaceTableRowsMatch.tableId, count: rows.length }
+        });
+        await persistState();
+        respondJson(res, 201, { rows, table: requireWorkspaceTable(state, ctx.tenantId, workspaceTableRowsMatch.tableId) });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/tables/import-live-query") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const connection = requireSourceConnection(state, tenant.id, body.connectionId);
+        const result = importLiveQueryToWorkspaceTable(state, tenant, {
+          tableId: body.tableId,
+          tableName: body.tableName,
+          createdBy: ctx.userId,
+          connection,
+          queryPayload: {
+            query: body.query,
+            timeoutMs: body.timeoutMs,
+            costLimit: body.costLimit
+          }
+        }, { runLiveQuery });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_table_import_live_query",
+          details: {
+            tableId: result.table.id,
+            resultId: result.resultId,
+            insertedRows: result.insertedRows
+          }
+        });
+        await persistState();
+        respondJson(res, 201, result);
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/onboarding") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureTenantSettings(state, tenant);
+        ensureDefaultModelProfiles(state, tenant);
+        ensureDefaultReportTypes(state, tenant);
+        const onboarding = buildOnboardingState(state, tenant);
+        respondJson(res, 200, { onboarding });
+        return;
+      }
+
+      const onboardingActionMatch = pathMatcher(pathname, "/v1/workspace/onboarding/actions/:actionId");
+      if (method === "POST" && onboardingActionMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        ensureTenantSettings(state, tenant);
+        ensureDefaultModelProfiles(state, tenant);
+        ensureDefaultReportTypes(state, tenant);
+        ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
+
+        const actionId = onboardingActionMatch.actionId;
+        const result = { actionId, status: "completed" };
+
+        if (actionId === "connect_source") {
+          if (!state.sourceConnections.some((item) => item.tenantId === tenant.id)) {
+            result.integration = quickAddIntegration(state, tenant, {
+              integrationKey: "google_ads",
+              authRef: "onboarding_seed_token",
+              runInitialSync: true,
+              periodDays: 21
+            }, {
+              createSourceConnection,
+              runSourceSync,
+              patchSettingsChannels,
+              createMcpServer,
+              testMcpServer
+            });
+          } else {
+            result.status = "noop";
+          }
+        } else if (actionId === "configure_llm") {
+          patchSettingsModelPreferences(state, tenant, {
+            llmMode: "managed",
+            defaultProvider: "managed"
+          });
+          result.modelPreferences = getTenantSettings(state, tenant).modelPreferences;
+        } else if (actionId === "choose_profile") {
+          const profiles = listModelProfiles(state, tenant.id);
+          const target = profiles.find((item) => item.active) || profiles[0];
+          if (target) {
+            result.profile = activateModelProfile(state, tenant, target.id);
+          } else {
+            result.status = "noop";
+          }
+        } else if (actionId === "run_first_analysis") {
+          let source = state.sourceConnections.find((item) => item.tenantId === tenant.id);
+          if (!source) {
+            quickAddIntegration(state, tenant, {
+              integrationKey: "google_ads",
+              authRef: "onboarding_seed_token",
+              runInitialSync: true,
+              periodDays: 21
+            }, {
+              createSourceConnection,
+              runSourceSync,
+              patchSettingsChannels,
+              createMcpServer,
+              testMcpServer
+            });
+            source = state.sourceConnections.find((item) => item.tenantId === tenant.id);
+          }
+          const profile = listModelProfiles(state, tenant.id).find((item) => item.active) || listModelProfiles(state, tenant.id)[0];
+          const reportType = listReportTypes(state, tenant.id)[0];
+          const folder = listWorkspaceFolders(state, tenant.id)[0];
+          const thread = listWorkspaceThreads(state, tenant.id, { folderId: folder?.id })[0];
+          const run = createAnalysisRun(state, tenant, {
+            sourceConnectionId: source?.id ?? null,
+            modelProfileId: profile?.id ?? null,
+            reportTypeId: reportType?.id ?? null,
+            folderId: folder?.id ?? null,
+            threadId: thread?.id ?? null,
+            channels: ["email"]
+          });
+          result.run = executeAnalysisRun(state, tenant, run, {
+            requireSourceConnection,
+            runSourceSync,
+            requireModelProfile,
+            runModelTask,
+            requireReportType,
+            generateReport,
+            runSkillPack,
+            buildMemoryContext,
+            snapshotMemoryContext
+          }, {
+            forceSync: true,
+            userId: ctx.userId
+          });
+        } else if (actionId === "deliver_report") {
+          let completed = listAnalysisRuns(state, tenant.id)
+            .filter((run) => run.status === "completed")
+            .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0] ?? null;
+          if (!completed) {
+            const source = state.sourceConnections.find((item) => item.tenantId === tenant.id);
+            const profile = listModelProfiles(state, tenant.id).find((item) => item.active) || listModelProfiles(state, tenant.id)[0];
+            const reportType = listReportTypes(state, tenant.id)[0];
+            const run = createAnalysisRun(state, tenant, {
+              sourceConnectionId: source?.id ?? null,
+              modelProfileId: profile?.id ?? null,
+              reportTypeId: reportType?.id ?? null,
+              channels: ["email"]
+            });
+            completed = executeAnalysisRun(state, tenant, run, {
+              requireSourceConnection,
+              runSourceSync,
+              requireModelProfile,
+              runModelTask,
+              requireReportType,
+              generateReport,
+              runSkillPack,
+              buildMemoryContext,
+              snapshotMemoryContext
+            }, {
+              forceSync: true,
+              userId: ctx.userId
+            });
+          }
+          const settings = getTenantSettings(state, tenant);
+          const channels = [];
+          if (settings.channels?.slack?.enabled) channels.push("slack");
+          if (settings.channels?.telegram?.enabled) channels.push("telegram");
+          if (!channels.length) channels.push("email");
+          result.delivery = deliverAnalysisRun(state, tenant, completed, { notifyReportDelivery }, { channels });
+        } else {
+          const err = new Error(`Unknown onboarding action '${actionId}'`);
+          err.statusCode = 404;
+          throw err;
+        }
+
+        const onboarding = buildOnboardingState(state, tenant);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_onboarding_action",
+          details: { actionId, status: result.status }
+        });
+        await persistState();
+        respondJson(res, 200, { onboarding, result });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/attachments/upload") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const contentType = String(req.headers["content-type"] ?? "").toLowerCase();
+        let attachmentPayload = {};
+        if (contentType.startsWith("multipart/form-data")) {
+          const multipart = await parseMultipartForm(req);
+          if (!multipart.file) {
+            respondJson(res, 400, { error: "multipart file is required" });
+            return;
+          }
+          attachmentPayload = {
+            filename: multipart.file.filename,
+            mimeType: multipart.file.mimeType,
+            size: multipart.file.size,
+            data: multipart.file.data
+          };
+        } else {
+          const body = await parseJsonBody(req);
+          attachmentPayload = {
+            name: body.name,
+            mimeType: body.mimeType,
+            size: body.size,
+            contentBase64: body.contentBase64
+          };
+        }
+        const asset = buildAttachmentAsset(state, tenant.id, ctx.userId, attachmentPayload);
+        const view = attachmentAssetView(asset);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_attachment_uploaded",
+          details: { attachmentId: asset.id, mimeType: asset.mimeType, size: asset.size }
+        });
+        await persistState();
+        respondJson(res, 201, view);
+        return;
+      }
+
+      const workspaceAttachmentMatch = pathMatcher(pathname, "/v1/workspace/attachments/:attachmentId");
+      if (method === "GET" && workspaceAttachmentMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const asset = requireAttachmentAsset(state, ctx.tenantId, workspaceAttachmentMatch.attachmentId);
+        respondJson(res, 200, attachmentAssetView(asset));
         return;
       }
 
@@ -1023,6 +1900,13 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireTenantHeader(ctx);
         requireTenant(state, ctx.tenantId);
         const notification = markNotificationRead(state, ctx.tenantId, ctx.userId, workspaceNotificationReadMatch.notificationId);
+        emitRealtime({
+          tenantId: ctx.tenantId,
+          threadId: notification.threadId,
+          type: "notification.read",
+          audienceUserIds: [ctx.userId],
+          payload: { notificationId: notification.id }
+        });
         await persistState();
         respondJson(res, 200, { notification });
         return;
@@ -1352,6 +2236,112 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      const automationHeartbeatMatch = pathMatcher(pathname, "/v1/automations/:automationId/heartbeat");
+      if (method === "GET" && automationHeartbeatMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const automation = listFolderAutomations(state, ctx.tenantId).find((item) => item.id === automationHeartbeatMatch.automationId);
+        if (!automation) {
+          respondJson(res, 404, { error: `Folder automation '${automationHeartbeatMatch.automationId}' not found` });
+          return;
+        }
+        const content = String(automation.heartbeatContent || "");
+        const validated = validateHeartbeatContent(content);
+        respondJson(res, 200, {
+          heartbeat: {
+            automationId: automation.id,
+            tenantId: ctx.tenantId,
+            content,
+            parsed: validated.config,
+            valid: validated.ok,
+            errors: validated.errors,
+            updatedAt: automation.updatedAt
+          }
+        });
+        return;
+      }
+
+      if (method === "PATCH" && automationHeartbeatMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const content = String(body.content ?? "");
+        const validated = validateHeartbeatContent(content);
+        const automation = patchFolderAutomation(state, ctx.tenantId, automationHeartbeatMatch.automationId, {
+          triggerType: "heartbeat",
+          heartbeatContent: content,
+          heartbeatPath: body.heartbeatPath,
+          targetThreadId: body.targetThreadId
+        });
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "automation_heartbeat_updated",
+          details: { automationId: automation.id, valid: validated.ok, errors: validated.errors.length }
+        });
+        await persistState();
+        respondJson(res, 200, {
+          heartbeat: {
+            automationId: automation.id,
+            tenantId: ctx.tenantId,
+            content,
+            parsed: validated.config,
+            valid: validated.ok,
+            errors: validated.errors,
+            updatedAt: automation.updatedAt
+          }
+        });
+        return;
+      }
+
+      const automationHeartbeatExportMatch = pathMatcher(pathname, "/v1/automations/:automationId/heartbeat/export");
+      if (method === "POST" && automationHeartbeatExportMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const automation = listFolderAutomations(state, ctx.tenantId).find((item) => item.id === automationHeartbeatExportMatch.automationId);
+        if (!automation) {
+          respondJson(res, 404, { error: `Folder automation '${automationHeartbeatExportMatch.automationId}' not found` });
+          return;
+        }
+        const content = String(body.content ?? automation.heartbeatContent ?? "");
+        const validated = validateHeartbeatContent(content);
+        if (!validated.ok) {
+          respondJson(res, 400, { error: "Heartbeat content is invalid", errors: validated.errors });
+          return;
+        }
+        const runtimeDir = path.join(process.cwd(), ".runtime", "heartbeats", ctx.tenantId, automation.folderId);
+        fs.mkdirSync(runtimeDir, { recursive: true });
+        const exportPath = path.join(runtimeDir, "heartbeat.md");
+        fs.writeFileSync(exportPath, content, "utf8");
+        patchFolderAutomation(state, ctx.tenantId, automation.id, {
+          triggerType: "heartbeat",
+          heartbeatContent: content,
+          heartbeatPath: exportPath
+        });
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "automation_heartbeat_exported",
+          details: { automationId: automation.id, exportPath }
+        });
+        await persistState();
+        respondJson(res, 200, {
+          heartbeat: {
+            automationId: automation.id,
+            tenantId: ctx.tenantId,
+            valid: true,
+            exportPath
+          }
+        });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/automations/runs") {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
@@ -1503,6 +2493,103 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           context: body.context
         });
         respondJson(res, 200, { previews });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/reports/templates") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const reportTypeId = base.searchParams.get("reportTypeId") ?? undefined;
+        const templates = listReportTemplates(state, ctx.tenantId, { reportTypeId });
+        respondJson(res, 200, { templates });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/reports/templates/upload") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+
+        let body = {};
+        const contentType = String(req.headers["content-type"] ?? "");
+        if (contentType.includes("multipart/form-data")) {
+          const multipart = await parseMultipartForm(req);
+          if (!multipart.file) {
+            respondJson(res, 400, { error: "multipart file is required" });
+            return;
+          }
+          const fileBody = Buffer.from(multipart.file.data).toString("utf8");
+          body = {
+            name: multipart.fields.name || multipart.file.filename.replace(/\\.md$/i, ""),
+            body: fileBody,
+            reportTypeId: multipart.fields.reportTypeId || null,
+            objective: multipart.fields.objective || null,
+            domain: multipart.fields.domain || null,
+            active: String(multipart.fields.active || "").toLowerCase() === "true"
+          };
+        } else {
+          body = await parseJsonBody(req);
+        }
+
+        const template = uploadReportTemplate(state, tenant, body);
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "report_template_uploaded",
+          details: { templateId: template.id, version: template.version, reportTypeId: template.reportTypeId }
+        });
+        await persistState();
+        respondJson(res, 201, { template });
+        return;
+      }
+
+      const reportTemplatePatchMatch = pathMatcher(pathname, "/v1/reports/templates/:templateId");
+      if (method === "PATCH" && reportTemplatePatchMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const template = patchReportTemplate(state, ctx.tenantId, reportTemplatePatchMatch.templateId, body);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "report_template_updated",
+          details: { templateId: template.id, version: template.version }
+        });
+        await persistState();
+        respondJson(res, 200, { template });
+        return;
+      }
+
+      const reportTemplateActivateMatch = pathMatcher(pathname, "/v1/reports/templates/:templateId/activate");
+      if (method === "POST" && reportTemplateActivateMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const template = activateReportTemplate(state, ctx.tenantId, reportTemplateActivateMatch.templateId);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "report_template_activated",
+          details: { templateId: template.id, reportTypeId: template.reportTypeId }
+        });
+        await persistState();
+        respondJson(res, 200, { template });
+        return;
+      }
+
+      const reportTemplatePreviewMatch = pathMatcher(pathname, "/v1/reports/templates/:templateId/preview");
+      if (method === "POST" && reportTemplatePreviewMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const preview = previewReportTemplate(state, ctx.tenantId, reportTemplatePreviewMatch.templateId, body);
+        respondJson(res, 200, preview);
         return;
       }
 
@@ -2090,7 +3177,29 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
 
         const body = await parseJsonBody(req);
         const tenant = requireTenant(state, ctx.tenantId);
+        const resolvedTemplate = body.templateId
+          ? requireReportTemplate(state, tenant.id, body.templateId)
+          : resolveActiveTemplate(state, tenant.id, {
+              reportTypeId: body.reportTypeId,
+              objective: body.objective,
+              domain: body.domain
+            });
+        const templateBody = compileReportTemplateBody(resolvedTemplate, {
+          reportTitle: body.title ?? `${tenant.name} Executive Report`,
+          reportSummary: body.summary ?? "",
+          channel: "email",
+          runId: body.runId ?? "",
+          confidence: body.confidence ?? ""
+        });
         const result = generateReport(state, tenant, body);
+        if (resolvedTemplate) {
+          result.report.templateId = resolvedTemplate.id;
+          result.report.templateVersion = resolvedTemplate.version;
+          if (templateBody) {
+            result.report.body = templateBody;
+            result.report.summary = result.report.summary || `Rendered from template ${resolvedTemplate.name}`;
+          }
+        }
 
         pushAudit(state, {
           tenantId: tenant.id,
@@ -2098,7 +3207,8 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           action: "report_generated",
           details: {
             reportId: result.report.id,
-            channels: body.channels ?? ["email"]
+            channels: body.channels ?? ["email"],
+            templateId: resolvedTemplate?.id ?? null
           }
         });
         await persistState();
@@ -2378,6 +3488,20 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
     }
   });
 
+  server.on("upgrade", (req, socket, head) => {
+    const enabled = state.featureFlags?.realtime_ws_enabled !== false;
+    if (!enabled) {
+      socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    const handled = handleRealtimeUpgrade(req, socket, head, realtimeHub);
+    if (!handled) {
+      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+      socket.destroy();
+    }
+  });
+
   return {
     state,
     server,
@@ -2386,6 +3510,12 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
       stopScheduler();
       if (automationTimer) clearInterval(automationTimer);
       if (doctorTimer) clearInterval(doctorTimer);
+      for (const client of realtimeHub.clients.values()) {
+        try {
+          client.socket.end();
+        } catch {}
+      }
+      realtimeHub.clients.clear();
     }
   };
 }

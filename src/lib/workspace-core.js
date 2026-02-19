@@ -72,11 +72,18 @@ function normalizeAttachments(input) {
     .map((item, idx) => {
       const id = String(item?.id ?? `attachment_${idx + 1}`);
       const name = String(item?.name ?? "file");
+      const previewUrl = item?.previewUrl ? String(item.previewUrl) : "";
+      const url = item?.url ? String(item.url) : "";
       return {
         id,
+        attachmentId: item?.attachmentId ? String(item.attachmentId) : id,
         name: name.slice(0, 240),
-        type: String(item?.type ?? ""),
-        size: Number(item?.size ?? 0)
+        type: String(item?.type ?? item?.mimeType ?? ""),
+        mimeType: String(item?.mimeType ?? item?.type ?? ""),
+        size: Number(item?.size ?? 0),
+        previewable: Boolean(item?.previewable),
+        url: url.slice(0, 2000),
+        previewUrl: previewUrl.slice(0, 2000)
       };
     });
 }
@@ -209,6 +216,30 @@ function touchParentThreadState(state, message) {
   parent.replyCount = Number(parent.replyCount ?? 0) + 1;
   parent.hasMiniThread = parent.replyCount > 1;
   parent.updatedAt = nowIso();
+}
+
+function summarizeMessageReactions(state, tenantId, messageId, viewerUserId) {
+  const grouped = new Map();
+  const reactions = state.messageReactions
+    .filter((item) => item.tenantId === tenantId && item.messageId === messageId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  for (const reaction of reactions) {
+    if (!grouped.has(reaction.emoji)) {
+      grouped.set(reaction.emoji, {
+        emoji: reaction.emoji,
+        count: 0,
+        userIds: [],
+        mineReactionId: null
+      });
+    }
+    const entry = grouped.get(reaction.emoji);
+    entry.count += 1;
+    entry.userIds.push(reaction.userId);
+    if (viewerUserId && reaction.userId === viewerUserId && !entry.mineReactionId) {
+      entry.mineReactionId = reaction.id;
+    }
+  }
+  return [...grouped.values()];
 }
 
 function baseAgentResponse(sourceMessage, agentProfile, promptOverride) {
@@ -501,9 +532,10 @@ export function ensureWorkspaceAgentProfile(state, tenant) {
   if (existing) return existing;
   const profile = {
     tenantId: tenant.id,
-    name: "InsightFoundry Agent",
+    name: "Titus",
     avatarStyle: "orb",
     tonePreset: "operator",
+    mentionAliases: ["titus"],
     defaultModelProfileId: null,
     updatedAt: nowIso()
   };
@@ -526,7 +558,13 @@ export function patchWorkspaceAgentProfile(state, tenantId, payload = {}) {
   if (payload.name != null) profile.name = String(payload.name);
   if (payload.avatarStyle != null) profile.avatarStyle = String(payload.avatarStyle);
   if (payload.tonePreset != null) profile.tonePreset = String(payload.tonePreset);
+  if (Array.isArray(payload.mentionAliases)) {
+    profile.mentionAliases = payload.mentionAliases.map((alias) => String(alias).toLowerCase()).filter(Boolean);
+  }
   if (payload.defaultModelProfileId !== undefined) profile.defaultModelProfileId = payload.defaultModelProfileId;
+  if (!Array.isArray(profile.mentionAliases) || !profile.mentionAliases.length) {
+    profile.mentionAliases = [String(profile.name || "titus").toLowerCase()];
+  }
   profile.updatedAt = nowIso();
   return profile;
 }
@@ -667,11 +705,16 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
 
 export function listThreadMessages(state, tenantId, threadId, viewerUserId, viewerChannel = "web") {
   const thread = requireWorkspaceThread(state, tenantId, threadId);
+  const addReactions = (message) => ({
+    ...message,
+    reactions: summarizeMessageReactions(state, tenantId, message.id, viewerUserId)
+  });
   return state.chatMessages
     .filter((item) => item.tenantId === tenantId && item.threadId === threadId && item.parentMessageId === null)
     .filter((item) => messageVisibleInThreadMode(item, thread, viewerUserId, viewerChannel))
     .sort(compareByCreatedAtAsc)
-    .map((message) => projectMessageForViewer(message, viewerUserId));
+    .map((message) => projectMessageForViewer(message, viewerUserId))
+    .map(addReactions);
 }
 
 export function listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel = "web") {
@@ -686,7 +729,11 @@ export function listMessageReplies(state, tenantId, threadId, parentMessageId, v
     .filter((item) => item.tenantId === tenantId && item.threadId === threadId && item.parentMessageId === parentMessageId)
     .filter((item) => messageVisibleInThreadMode(item, thread, viewerUserId, viewerChannel))
     .sort(compareByCreatedAtAsc)
-    .map((reply) => projectMessageForViewer(reply, viewerUserId));
+    .map((reply) => projectMessageForViewer(reply, viewerUserId))
+    .map((reply) => ({
+      ...reply,
+      reactions: summarizeMessageReactions(state, tenantId, reply.id, viewerUserId)
+    }));
 }
 
 export function getMiniThread(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel = "web") {
@@ -698,7 +745,10 @@ export function getMiniThread(state, tenantId, threadId, parentMessageId, viewer
   }
   const replies = listMessageReplies(state, tenantId, threadId, parentMessageId, viewerUserId, viewerChannel);
   return {
-    parent: projectMessageForViewer(parent, viewerUserId),
+    parent: {
+      ...projectMessageForViewer(parent, viewerUserId),
+      reactions: summarizeMessageReactions(state, tenantId, parent.id, viewerUserId)
+    },
     replies,
     mode: replies.length > 1 ? "mini-thread" : "inline"
   };
@@ -785,6 +835,69 @@ export function listThreadAttachments(state, tenantId, threadId, viewerUserId, v
       authorName: message.authorName
     })))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+export function listFolderAttachments(state, tenantId, folderId, viewerUserId, viewerChannel = "web") {
+  requireWorkspaceFolder(state, tenantId, folderId);
+  const threadIds = new Set(
+    state.workspaceThreads
+      .filter((thread) => thread.tenantId === tenantId && thread.folderId === folderId)
+      .map((thread) => thread.id)
+  );
+  if (!threadIds.size) return [];
+
+  const threadsById = new Map(
+    state.workspaceThreads
+      .filter((thread) => thread.tenantId === tenantId && threadIds.has(thread.id))
+      .map((thread) => [thread.id, thread])
+  );
+  const dedup = new Map();
+
+  state.chatMessages
+    .filter((message) => message.tenantId === tenantId && threadIds.has(message.threadId))
+    .forEach((message) => {
+      const thread = threadsById.get(message.threadId);
+      if (!thread) return;
+      if (!messageVisibleInThreadMode(message, thread, viewerUserId, viewerChannel)) return;
+      const visible = projectMessageForViewer(message, viewerUserId);
+      for (const attachment of visible.attachments || []) {
+        const attachmentId = String(attachment.attachmentId ?? attachment.id ?? "");
+        if (!attachmentId) continue;
+        if (!dedup.has(attachmentId)) {
+          dedup.set(attachmentId, {
+            attachmentId,
+            id: attachmentId,
+            name: attachment.name,
+            mimeType: attachment.mimeType || attachment.type || "application/octet-stream",
+            size: Number(attachment.size || 0),
+            previewable: Boolean(attachment.previewable),
+            previewUrl: attachment.previewUrl || "",
+            threadIds: new Set([message.threadId]),
+            lastUsedAt: message.createdAt
+          });
+          continue;
+        }
+        const current = dedup.get(attachmentId);
+        current.threadIds.add(message.threadId);
+        if (current.lastUsedAt < message.createdAt) {
+          current.lastUsedAt = message.createdAt;
+        }
+      }
+    });
+
+  return [...dedup.values()]
+    .map((item) => ({
+      attachmentId: item.attachmentId,
+      id: item.id,
+      name: item.name,
+      mimeType: item.mimeType,
+      size: item.size,
+      previewable: item.previewable,
+      previewUrl: item.previewUrl,
+      threadIds: [...item.threadIds],
+      lastUsedAt: item.lastUsedAt
+    }))
+    .sort((a, b) => (a.lastUsedAt < b.lastUsedAt ? 1 : -1));
 }
 
 export function listNotifications(state, tenantId, userId) {
