@@ -106,6 +106,29 @@
       .nav {
         display: flex;
         gap: 8px;
+        align-items: center;
+      }
+      .session-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #ffffff;
+        padding: 4px 8px;
+      }
+      .session-controls select {
+        min-width: 170px;
+        border: 1px solid var(--line);
+      }
+      .session-role {
+        font-size: var(--size-11);
+        font-family: var(--font-mono);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 8px;
+        color: var(--muted);
+        background: #f8fafc;
       }
       .nav button,
       button,
@@ -686,6 +709,11 @@
           </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center">
+          <div class="session-controls">
+            <label class="subtle" for="sessionUserSelect">Acting as</label>
+            <select id="sessionUserSelect"></select>
+            <span id="sessionRoleBadge" class="session-role">owner</span>
+          </div>
           <div class="nav">
             <button data-route-target="workspace" class="active">Workspace</button>
             <button data-route-target="settings">Settings</button>
@@ -934,6 +962,9 @@
         agentJobs: [],
         deviceCommands: [],
         team: [],
+        currentUserId: "ui-user",
+        currentUserRole: "owner",
+        currentUserName: "Owner",
         folders: [],
         threads: [],
         messagesByThread: {},
@@ -973,8 +1004,8 @@
         return {
           "content-type": "application/json",
           "x-tenant-id": appState.tenantId,
-          "x-user-id": "ui-user",
-          "x-user-role": "owner"
+          "x-user-id": appState.currentUserId || "ui-user",
+          "x-user-role": appState.currentUserRole || "owner"
         };
       }
 
@@ -990,8 +1021,14 @@
         if (!res.ok) {
           const err = new Error(data.error || `Request failed: ${res.status}`);
           err.payload = data;
+          if (res.status === 403) {
+            setSystemAlert(`Permission denied for ${appState.currentUserRole}: ${err.message}`);
+          } else if (res.status >= 400 && res.status < 500) {
+            setSystemAlert(err.message);
+          }
           throw err;
         }
+        setSystemAlert("");
         return data;
       }
 
@@ -1005,6 +1042,14 @@
         }
         alert.hidden = false;
         alert.textContent = message;
+      }
+
+      function renderTenantLabel() {
+        const label = document.getElementById("tenantLabel");
+        if (!label) return;
+        const userName = appState.currentUserName || appState.currentUserId || "user";
+        const role = appState.currentUserRole || "owner";
+        label.textContent = `Tenant: ${appState.tenantId} • User: ${userName} (${role})`;
       }
 
       function setRoute(route) {
@@ -1119,11 +1164,47 @@
         return appState.threads.find((item) => item.id === appState.activeThreadId) || null;
       }
 
+      function currentTeamMember() {
+        return appState.team.find((member) => member.id === appState.currentUserId) || null;
+      }
+
+      function renderSessionUserControls() {
+        const select = document.getElementById("sessionUserSelect");
+        const roleBadge = document.getElementById("sessionRoleBadge");
+        if (!select || !roleBadge) return;
+        const activeMembers = appState.team.filter((member) => member.status !== "inactive");
+        const candidateMembers = activeMembers.length ? activeMembers : appState.team;
+        if (!candidateMembers.length) {
+          select.innerHTML = `<option value="ui-user">ui-user</option>`;
+          appState.currentUserId = "ui-user";
+          appState.currentUserRole = "owner";
+          appState.currentUserName = "Owner";
+          roleBadge.textContent = appState.currentUserRole;
+          return;
+        }
+        if (!candidateMembers.some((member) => member.id === appState.currentUserId)) {
+          appState.currentUserId = candidateMembers[0].id;
+          appState.currentUserRole = candidateMembers[0].role;
+          appState.currentUserName = candidateMembers[0].name;
+        }
+        select.innerHTML = candidateMembers.map((member) => `
+          <option value="${member.id}" ${member.id === appState.currentUserId ? "selected" : ""}>
+            ${member.name} (${member.role})
+          </option>
+        `).join("");
+        const current = candidateMembers.find((member) => member.id === appState.currentUserId) || candidateMembers[0];
+        appState.currentUserRole = current.role;
+        appState.currentUserName = current.name;
+        roleBadge.textContent = current.role;
+      }
+
       function escapeHtml(input) {
         return String(input ?? "")
           .replaceAll("&", "&amp;")
           .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;");
+          .replaceAll(">", "&gt;")
+          .replaceAll("\"", "&quot;")
+          .replaceAll("'", "&#39;");
       }
 
       function teamColorForMember(memberId) {
@@ -1615,6 +1696,7 @@
             <div class="context-kv"><div class="subtle">Run Status</div><div>${run ? run.status : "Drafting"}</div></div>
             <div class="context-kv"><div class="subtle">Confidence</div><div>${insight?.confidence != null ? Number(insight.confidence).toFixed(2) : "n/a"}</div></div>
             <div class="context-kv"><div class="subtle">Workspace Agent</div><div>${appState.workspaceAgentProfile?.name || "InsightFoundry Agent"}</div></div>
+            <div class="context-kv"><div class="subtle">Acting As</div><div>${appState.currentUserName || appState.currentUserId} (${appState.currentUserRole})</div></div>
             <div class="context-kv"><div class="subtle">Unread Notifications</div><div>${appState.notifications.filter((item) => !item.read).length}</div></div>
           </div>
         `;
@@ -1990,9 +2072,21 @@
 
       function renderSettingsTeam() {
         const agent = appState.workspaceAgentProfile || {};
+        const current = currentTeamMember();
         const box = document.getElementById("settings-team");
         box.innerHTML = `
-          <h3>Team</h3>
+          <h3>Users and Team</h3>
+          <div class="card" style="margin-top:8px">
+            <h4>Session User (Real Testing)</h4>
+            <div class="subtle">Switch who the UI acts as to test role-based access, private AI visibility, and notifications.</div>
+            <div class="form-grid" style="margin-top:8px">
+              <label>Active User
+                <select id="teamSessionUserSelect"></select>
+              </label>
+              <label>Role<input id="teamSessionRole" disabled value="${current?.role || appState.currentUserRole}" /></label>
+              <label class="full">Status<input id="teamSessionStatus" disabled value="${current?.status || "active"}" /></label>
+            </div>
+          </div>
           <div class="card" style="margin-top:8px">
             <h4>Workspace Agent</h4>
             <div class="form-grid">
@@ -2013,7 +2107,7 @@
               <button id="saveWorkspaceAgentBtn" class="primary">Save Agent</button>
             </div>
           </div>
-          <div class="subtle">Add members for shared workspace threads, comments, and approvals.</div>
+          <div class="subtle">Add members and manage role/status/title for shared workspace threads, approvals, and automations.</div>
           <div class="form-grid" style="margin-top:8px">
             <label>Name<input id="teamName" placeholder="Alex Rivera" /></label>
             <label>Email<input id="teamEmail" placeholder="alex@firm.com" /></label>
@@ -2039,6 +2133,25 @@
                 <div><strong>${member.name}</strong> <span class="status mono">${member.role}</span></div>
                 <div class="subtle">${member.email}${member.title ? ` • ${member.title}` : ""}</div>
                 <div class="form-grid" style="margin-top:8px">
+                  <label>Name<input data-member-name value="${escapeHtml(member.name)}" /></label>
+                  <label>Title<input data-member-title value="${escapeHtml(member.title || "")}" /></label>
+                  <label>Email<input data-member-email value="${escapeHtml(member.email || "")}" /></label>
+                  <label>Role
+                    <select data-member-role>
+                      <option value="owner" ${member.role === "owner" ? "selected" : ""}>owner</option>
+                      <option value="admin" ${member.role === "admin" ? "selected" : ""}>admin</option>
+                      <option value="operator" ${member.role === "operator" ? "selected" : ""}>operator</option>
+                      <option value="analyst" ${member.role === "analyst" ? "selected" : ""}>analyst</option>
+                      <option value="viewer" ${member.role === "viewer" ? "selected" : ""}>viewer</option>
+                    </select>
+                  </label>
+                  <label>Status
+                    <select data-member-status>
+                      <option value="active" ${member.status === "active" ? "selected" : ""}>active</option>
+                      <option value="paused" ${member.status === "paused" ? "selected" : ""}>paused</option>
+                      <option value="inactive" ${member.status === "inactive" ? "selected" : ""}>inactive</option>
+                    </select>
+                  </label>
                   <label>Color Mode
                     <select data-member-color-mode>
                       <option value="deterministic" ${(appState.teamAppearanceByMember[member.id]?.colorMode || "deterministic") === "deterministic" ? "selected" : ""}>deterministic</option>
@@ -2046,11 +2159,33 @@
                     </select>
                   </label>
                   <label>Color Hex<input data-member-color value="${appState.teamAppearanceByMember[member.id]?.colorHex || teamColorForMember(member.id)}" /></label>
-                  <button data-save-member-color="${member.id}">Save Color</button>
+                  <div class="toolbar" style="grid-column:1 / -1">
+                    <button data-save-member="${member.id}" class="primary">Save Member</button>
+                    <button data-save-member-color="${member.id}">Save Color</button>
+                    <button data-act-as-member="${member.id}">Act As This User</button>
+                  </div>
                 </div>
               </div>
             `).join("")
           : `<div class="item">No team members yet</div>`;
+
+        const teamSessionUserSelect = document.getElementById("teamSessionUserSelect");
+        if (teamSessionUserSelect) {
+          const members = appState.team.filter((member) => member.status !== "inactive");
+          teamSessionUserSelect.innerHTML = members.map((member) => `
+            <option value="${member.id}" ${member.id === appState.currentUserId ? "selected" : ""}>${member.name} (${member.role})</option>
+          `).join("");
+          teamSessionUserSelect.onchange = async () => {
+            const selected = appState.team.find((member) => member.id === teamSessionUserSelect.value);
+            if (!selected) return;
+            appState.currentUserId = selected.id;
+            appState.currentUserRole = selected.role;
+            appState.currentUserName = selected.name;
+            renderSessionUserControls();
+            await loadAll();
+            setSettingsTab("team");
+          };
+        }
 
         const saveWorkspaceAgentBtn = document.getElementById("saveWorkspaceAgentBtn");
         if (saveWorkspaceAgentBtn) {
@@ -2068,6 +2203,39 @@
           };
         }
 
+        teamList.querySelectorAll("[data-save-member]").forEach((btn) => {
+          btn.onclick = async () => {
+            const container = btn.closest("[data-member-id]");
+            if (!container) return;
+            const memberId = btn.dataset.saveMember;
+            const patchBody = {
+              name: container.querySelector("[data-member-name]")?.value?.trim(),
+              title: container.querySelector("[data-member-title]")?.value?.trim(),
+              email: container.querySelector("[data-member-email]")?.value?.trim(),
+              role: container.querySelector("[data-member-role]")?.value,
+              status: container.querySelector("[data-member-status]")?.value
+            };
+            await api(`/v1/settings/team/${encodeURIComponent(memberId)}`, {
+              method: "PATCH",
+              body: JSON.stringify(patchBody)
+            });
+            const selected = appState.team.find((member) => member.id === appState.currentUserId);
+            if (selected && selected.id === memberId) {
+              appState.currentUserRole = patchBody.role || selected.role;
+              if (patchBody.status === "inactive") {
+                const fallback = appState.team.find((member) => member.id !== memberId && member.status !== "inactive");
+                if (fallback) {
+                  appState.currentUserId = fallback.id;
+                  appState.currentUserRole = fallback.role;
+                  appState.currentUserName = fallback.name;
+                }
+              }
+            }
+            await loadAll();
+            setSettingsTab("team");
+          };
+        });
+
         teamList.querySelectorAll("[data-save-member-color]").forEach((btn) => {
           btn.onclick = async () => {
             const container = btn.closest("[data-member-id]");
@@ -2079,6 +2247,20 @@
               method: "PATCH",
               body: JSON.stringify({ colorMode, colorHex })
             });
+            await loadAll();
+            setSettingsTab("team");
+          };
+        });
+
+        teamList.querySelectorAll("[data-act-as-member]").forEach((btn) => {
+          btn.onclick = async () => {
+            const memberId = btn.dataset.actAsMember;
+            const selected = appState.team.find((member) => member.id === memberId);
+            if (!selected || selected.status === "inactive") return;
+            appState.currentUserId = selected.id;
+            appState.currentUserRole = selected.role;
+            appState.currentUserName = selected.name;
+            renderSessionUserControls();
             await loadAll();
             setSettingsTab("team");
           };
@@ -3274,6 +3456,8 @@
         appState.integrationCatalog = integrationsCatalogRes.integrations || [];
         appState.notifications = notificationsRes.notifications || [];
         appState.workspaceAgentProfile = workspaceAgentRes.profile || null;
+        renderSessionUserControls();
+        renderTenantLabel();
 
         const checklist = appState.settings?.checklist || {};
 
@@ -3329,7 +3513,7 @@
           }).then((r) => r.json());
           appState.tenantId = created.tenant.id;
         }
-        document.getElementById("tenantLabel").textContent = `Tenant: ${appState.tenantId}`;
+        renderTenantLabel();
       }
 
       async function createDraftRunFromBuilder() {
@@ -3582,6 +3766,19 @@
         document.querySelectorAll("[data-route-target]").forEach((btn) => {
           btn.onclick = () => setRoute(btn.dataset.routeTarget);
         });
+        const sessionUserSelect = document.getElementById("sessionUserSelect");
+        if (sessionUserSelect) {
+          sessionUserSelect.onchange = async () => {
+            const selected = appState.team.find((member) => member.id === sessionUserSelect.value);
+            if (!selected) return;
+            appState.currentUserId = selected.id;
+            appState.currentUserRole = selected.role;
+            appState.currentUserName = selected.name;
+            renderSessionUserControls();
+            renderTenantLabel();
+            await loadAll();
+          };
+        }
         const leftToggle = document.getElementById("toggleLeftRailBtn");
         const rightToggle = document.getElementById("toggleRightRailBtn");
         const focusToggle = document.getElementById("toggleFocusModeBtn");
@@ -3844,6 +4041,7 @@ Automation notes.`,
       async function boot() {
         bindEvents();
         applyWorkspaceLayout();
+        renderSessionUserControls();
         renderSavedPrompts();
         renderThreadList();
         await initTenant();

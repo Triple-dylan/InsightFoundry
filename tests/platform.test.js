@@ -1206,3 +1206,95 @@ Heartbeat automation`;
     await ctx.stop();
   }
 });
+
+test("team management updates member role/status and enforces permissions", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Team Mgmt Co");
+
+    const createMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        name: "Viewer User",
+        email: "viewer.user@example.com",
+        role: "viewer"
+      })
+    });
+    assert.equal(createMemberRes.status, 201);
+    const member = (await createMemberRes.json()).member;
+
+    const patchMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team/${member.id}`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        role: "operator",
+        status: "paused",
+        title: "Deal Desk Operator"
+      })
+    });
+    assert.equal(patchMemberRes.status, 200);
+    const patched = (await patchMemberRes.json()).member;
+    assert.equal(patched.role, "operator");
+    assert.equal(patched.status, "paused");
+    assert.equal(patched.title, "Deal Desk Operator");
+
+    const patchBackRes = await fetch(`${ctx.baseUrl}/v1/settings/team/${member.id}`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        role: "viewer",
+        status: "active"
+      })
+    });
+    assert.equal(patchBackRes.status, 200);
+
+    const viewerCreateFolderRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      method: "POST",
+      headers: {
+        ...tenantHeaders(tenant.id, "viewer"),
+        "x-user-id": member.id
+      },
+      body: JSON.stringify({ name: "Should Fail" })
+    });
+    assert.equal(viewerCreateFolderRes.status, 403);
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(foldersRes.status, 200);
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const viewerMessageRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: {
+        ...tenantHeaders(tenant.id, "viewer"),
+        "x-user-id": member.id
+      },
+      body: JSON.stringify({
+        body: "Viewer can comment in team thread",
+        visibility: "shared",
+        authorType: "user",
+        authorName: "viewer.user"
+      })
+    });
+    assert.equal(viewerMessageRes.status, 201);
+    const viewerMessageId = (await viewerMessageRes.json()).message.id;
+
+    const viewerAiRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages/${viewerMessageId}/ai`, {
+      method: "POST",
+      headers: {
+        ...tenantHeaders(tenant.id, "viewer"),
+        "x-user-id": member.id
+      },
+      body: JSON.stringify({ visibility: "shared" })
+    });
+    assert.equal(viewerAiRes.status, 403);
+  } finally {
+    await ctx.stop();
+  }
+});
