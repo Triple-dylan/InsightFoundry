@@ -41,12 +41,30 @@ export function patchTeamMember(state, tenantId, memberId, payload = {}) {
     err.statusCode = 404;
     throw err;
   }
-  if (payload.name != null) member.name = payload.name;
+  if (payload.name != null) {
+    const nextName = String(payload.name).trim();
+    if (!nextName) {
+      const err = new Error("name must not be empty");
+      err.statusCode = 400;
+      throw err;
+    }
+    member.name = nextName;
+  }
   if (payload.email != null) member.email = payload.email;
   if (payload.role != null) member.role = payload.role;
   if (payload.title != null) member.title = payload.title;
   if (payload.status != null) member.status = payload.status;
   member.updatedAt = nowIso();
+
+  if (payload.name != null) {
+    state.chatMessages
+      .filter((item) => item.tenantId === tenantId && item.authorId === memberId)
+      .forEach((item) => {
+        item.authorName = member.name;
+        item.updatedAt = nowIso();
+      });
+  }
+
   return member;
 }
 

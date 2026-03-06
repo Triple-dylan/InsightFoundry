@@ -104,6 +104,13 @@ const INTEGRATION_CATALOG = [
     description: "Enable Telegram alerts and run summaries."
   },
   {
+    key: "discord_alerts",
+    name: "Discord Alerts",
+    kind: "channel",
+    channel: "discord",
+    description: "Enable Discord alerts and run summaries."
+  },
+  {
     key: "google_drive_mcp",
     name: "Google Drive MCP",
     kind: "mcp",
@@ -226,6 +233,22 @@ export function quickAddIntegration(state, tenant, payload = {}, adapters = {}) 
         }
       });
       result.channel = "telegram";
+      result.enabled = true;
+      return result;
+    }
+    if (integration.channel === "discord") {
+      if (!payload.webhookRef) {
+        const err = new Error("webhookRef is required for Discord quick add");
+        err.statusCode = 400;
+        throw err;
+      }
+      adapters.patchSettingsChannels(state, tenant, {
+        discord: {
+          enabled: true,
+          webhookRef: payload.webhookRef
+        }
+      });
+      result.channel = "discord";
       result.enabled = true;
       return result;
     }

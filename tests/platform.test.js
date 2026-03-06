@@ -564,6 +564,60 @@ test("skill draft workflow validates and publishes to installed skills", async (
   }
 });
 
+test("model key setup masks secrets and skill draft generation returns skill markdown", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Skill Builder Co");
+
+    const setKeys = await fetch(`${ctx.baseUrl}/v1/settings/model-keys`, {
+      method: "PATCH",
+      headers: tenantHeaders(tenant.id),
+      body: JSON.stringify({
+        keys: [{ provider: "openai", apiKey: "sk-test-1234567890abcDEF123456" }]
+      })
+    });
+    assert.equal(setKeys.status, 200);
+    const setKeysBody = await setKeys.json();
+    assert.ok(setKeysBody.keys.some((item) => item.provider === "openai" && item.status === "configured"));
+    assert.ok(!JSON.stringify(setKeysBody).includes("sk-test-1234567890abcDEF123456"));
+
+    const listKeys = await fetch(`${ctx.baseUrl}/v1/settings/model-keys`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(listKeys.status, 200);
+    const listKeysBody = await listKeys.json();
+    assert.ok(listKeysBody.keys.some((item) => item.provider === "openai"));
+
+    const fallbackTenant = await createTenant(ctx.baseUrl, "Skill Builder Fallback Co");
+    const generated = await fetch(`${ctx.baseUrl}/v1/skills/drafts/generate`, {
+      method: "POST",
+      headers: tenantHeaders(fallbackTenant.id),
+      body: JSON.stringify({
+        provider: "managed",
+        answers: {
+          name: "Deal Desk Synthesizer",
+          description: "Generate policy-safe deal desk recommendations.",
+          intents: "deal_review, pricing_approval",
+          channels: "web,slack",
+          tools: "model.run,reports.generate,compute.deal_desk_snapshot",
+          confidenceMin: 0.74,
+          budgetCapUsd: 8000,
+          humanApprovalFor: "adjust_budget",
+          systemPrompt: "Review quote context and propose safe next actions."
+        }
+      })
+    });
+    assert.equal(generated.status, 201);
+    const generatedBody = await generated.json();
+    assert.ok(generatedBody.draft?.draftId);
+    assert.equal(typeof generatedBody.skillMd, "string");
+    assert.match(generatedBody.skillMd, /^#/);
+    assert.ok(["fallback", "llm"].includes(generatedBody.generation?.mode));
+  } finally {
+    await ctx.stop();
+  }
+});
+
 test("analysis run quality gate can block model execution", async () => {
   const ctx = await startServer();
   try {
@@ -1614,6 +1668,264 @@ test("doctor and skill registry endpoints support tenant-scoped hardening workfl
     const threatModel = (await threatModelRes.json()).threatModel;
     assert.equal(threatModel.exists, true);
     assert.match(threatModel.content, /assets:/i);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("chat polls, group-approval AI, and discord delivery channels are functional", async () => {
+  const ctx = await startServer();
+  try {
+    const tenant = await createTenant(ctx.baseUrl, "Realtime Collab Co");
+    const asUser = (userId, role = "owner") => ({
+      ...tenantHeaders(tenant.id, role),
+      "x-user-id": userId,
+      "x-user-role": role
+    });
+
+    const teamRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      headers: tenantHeaders(tenant.id)
+    });
+    assert.equal(teamRes.status, 200);
+    const team = (await teamRes.json()).team;
+    const owner = team[0];
+    assert.ok(owner?.id);
+
+    const addMemberRes = await fetch(`${ctx.baseUrl}/v1/settings/team`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        name: "Analyst Two",
+        email: "analyst.two@example.com",
+        role: "analyst"
+      })
+    });
+    assert.equal(addMemberRes.status, 201);
+    const analyst = (await addMemberRes.json()).member;
+
+    const foldersRes = await fetch(`${ctx.baseUrl}/v1/workspace/folders`, {
+      headers: asUser(owner.id, "owner")
+    });
+    assert.equal(foldersRes.status, 200);
+    const folderId = (await foldersRes.json()).folders[0].id;
+    const threadsRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads?folderId=${encodeURIComponent(folderId)}`, {
+      headers: asUser(owner.id, "owner")
+    });
+    assert.equal(threadsRes.status, 200);
+    const threadId = (await threadsRes.json()).threads[0].id;
+
+    const aiRequestRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        body: "@Titus summarize this thread with action items",
+        invokeAiMode: "auto",
+        requireGroupApproval: true
+      })
+    });
+    const aiRequestBody = await aiRequestRes.json();
+    assert.equal(aiRequestRes.status, 201, JSON.stringify(aiRequestBody));
+    assert.equal(aiRequestBody.aiApproval.status, "pending");
+
+    const approvalId = aiRequestBody.aiApproval.id;
+    const approveRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/approvals/${approvalId}/approve`, {
+      method: "POST",
+      headers: asUser(analyst.id, "analyst"),
+      body: JSON.stringify({})
+    });
+    assert.equal(approveRes.status, 200);
+    const approveBody = await approveRes.json();
+    assert.equal(approveBody.approval.status, "completed");
+    assert.ok(approveBody.aiMessage?.id);
+
+    const pollMessageRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        body: "Pick the next sprint focus",
+        poll: {
+          question: "What should we prioritize this week?",
+          options: ["Revenue", "Retention", "Ops debt"]
+        },
+        invokeAiMode: "none"
+      })
+    });
+    assert.equal(pollMessageRes.status, 201);
+    const pollMessageId = (await pollMessageRes.json()).message.id;
+
+    const voteRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/messages/${pollMessageId}/poll-vote`, {
+      method: "POST",
+      headers: asUser(analyst.id, "analyst"),
+      body: JSON.stringify({ optionIds: ["opt_2"] })
+    });
+    assert.equal(voteRes.status, 200);
+    const voteBody = await voteRes.json();
+    assert.ok(voteBody.poll.options.some((option) => option.id === "opt_2" && option.voterIds.includes(analyst.id)));
+
+    const patchChannelsRes = await fetch(`${ctx.baseUrl}/v1/settings/channels`, {
+      method: "PATCH",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        slack: {
+          enabled: true,
+          webhookRef: "https://slack.example/webhook",
+          bridge: {
+            enabled: true,
+            threadId
+          },
+          inbound: {
+            token: "slack_inbound_token"
+          }
+        },
+        discord: {
+          enabled: true,
+          webhookRef: "https://discord.example/webhook",
+          bridge: {
+            enabled: true,
+            threadId
+          },
+          inbound: {
+            token: "discord_inbound_token"
+          }
+        }
+      })
+    });
+    assert.equal(patchChannelsRes.status, 200);
+
+    const bridgedMessageRes = await fetch(`${ctx.baseUrl}/v1/workspace/chat/threads/${threadId}/messages`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        body: "Bridge this message to chat apps.",
+        invokeAiMode: "none"
+      })
+    });
+    assert.equal(bridgedMessageRes.status, 201);
+    const bridgedMessageBody = await bridgedMessageRes.json();
+    assert.equal(bridgedMessageBody.channelEvents.length, 2);
+    assert.ok(bridgedMessageBody.channelEvents.some((event) => event.channel === "slack" && event.eventType === "chat_bridge_delivery"));
+    assert.ok(bridgedMessageBody.channelEvents.some((event) => event.channel === "discord" && event.eventType === "chat_bridge_delivery"));
+
+    const inboundSlackRes = await fetch(`${ctx.baseUrl}/v1/channels/slack/inbound`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-channel-token": "slack_inbound_token"
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        event: {
+          text: "Inbound from Slack",
+          user: "U_42",
+          user_name: "Slack Analyst",
+          channel: "C_test",
+          thread_ts: "1700000000.000001"
+        }
+      })
+    });
+    assert.equal(inboundSlackRes.status, 201);
+    const inboundSlackBody = await inboundSlackRes.json();
+    assert.equal(inboundSlackBody.message.threadId, threadId);
+    assert.match(inboundSlackBody.message.authorName, /Slack/);
+    assert.ok(inboundSlackBody.threadLink?.id);
+
+    const linksAfterInboundRes = await fetch(`${ctx.baseUrl}/v1/channels/slack/thread-links`, {
+      headers: asUser(owner.id, "owner")
+    });
+    assert.equal(linksAfterInboundRes.status, 200);
+    const linksAfterInbound = (await linksAfterInboundRes.json()).links;
+    assert.ok(linksAfterInbound.some((link) => link.threadId === threadId));
+
+    const secondThreadRes = await fetch(`${ctx.baseUrl}/v1/workspace/threads`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        folderId,
+        title: "Second bridge target"
+      })
+    });
+    assert.equal(secondThreadRes.status, 201);
+    const secondThreadId = (await secondThreadRes.json()).thread.id;
+
+    const moveDefaultBridgeRes = await fetch(`${ctx.baseUrl}/v1/settings/channels`, {
+      method: "PATCH",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        slack: {
+          enabled: true,
+          webhookRef: "https://slack.example/webhook",
+          bridge: {
+            enabled: true,
+            threadId: secondThreadId
+          },
+          inbound: {
+            token: "slack_inbound_token"
+          }
+        }
+      })
+    });
+    assert.equal(moveDefaultBridgeRes.status, 200);
+
+    const inboundSlackAgainRes = await fetch(`${ctx.baseUrl}/v1/channels/slack/inbound`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-channel-token": "slack_inbound_token"
+      },
+      body: JSON.stringify({
+        tenantId: tenant.id,
+        event: {
+          text: "Inbound followup from same Slack thread",
+          user: "U_42",
+          user_name: "Slack Analyst",
+          channel: "C_test",
+          thread_ts: "1700000000.000001"
+        }
+      })
+    });
+    assert.equal(inboundSlackAgainRes.status, 201);
+    const inboundSlackAgain = await inboundSlackAgainRes.json();
+    assert.equal(inboundSlackAgain.message.threadId, threadId);
+
+    const createDiscordLinkRes = await fetch(`${ctx.baseUrl}/v1/channels/discord/thread-links`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        externalThreadKey: "discord:thread_123",
+        threadId: secondThreadId
+      })
+    });
+    assert.equal(createDiscordLinkRes.status, 201);
+    const createdDiscordLink = (await createDiscordLinkRes.json()).link;
+
+    const listDiscordLinksRes = await fetch(`${ctx.baseUrl}/v1/channels/discord/thread-links`, {
+      headers: asUser(owner.id, "owner")
+    });
+    assert.equal(listDiscordLinksRes.status, 200);
+    const discordLinks = (await listDiscordLinksRes.json()).links;
+    assert.ok(discordLinks.some((item) => item.id === createdDiscordLink.id && item.threadId === secondThreadId));
+
+    const deleteDiscordLinkRes = await fetch(`${ctx.baseUrl}/v1/channels/discord/thread-links/${encodeURIComponent(createdDiscordLink.id)}`, {
+      method: "DELETE",
+      headers: asUser(owner.id, "owner")
+    });
+    assert.equal(deleteDiscordLinkRes.status, 200);
+    const removedDiscordLink = (await deleteDiscordLinkRes.json()).removed;
+    assert.equal(removedDiscordLink.id, createdDiscordLink.id);
+
+    const reportRes = await fetch(`${ctx.baseUrl}/v1/reports/generate`, {
+      method: "POST",
+      headers: asUser(owner.id, "owner"),
+      body: JSON.stringify({
+        channels: ["discord"],
+        metricIds: ["revenue"]
+      })
+    });
+    assert.equal(reportRes.status, 201);
+    const reportBody = await reportRes.json();
+    assert.equal(reportBody.deliveryEvents.length, 1);
+    assert.equal(reportBody.deliveryEvents[0].channel, "discord");
+    assert.equal(reportBody.deliveryEvents[0].status, "delivered");
   } finally {
     await ctx.stop();
   }

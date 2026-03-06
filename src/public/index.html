@@ -6,9 +6,10 @@
     <title>InsightFoundry</title>
     <style>
       :root {
-        --bg: #f5f5f7;
+        --font-ui: "Sohne", "Söhne", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --bg: #f1f2f6;
         --panel: #ffffff;
-        --panel-muted: #fafafc;
+        --panel-muted: #f1f2f6;
         --line: #e4e6ea;
         --line-strong: #d4d9e1;
         --text: #18181b;
@@ -19,6 +20,7 @@
         --left-w: 292px;
         --right-w: 292px;
         --composer-w: 860px;
+        --dock-h: 340px;
       }
 
       * { box-sizing: border-box; }
@@ -31,10 +33,22 @@
       }
 
       body {
-        font-family: "Sohne", "Söhne", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: var(--font-ui);
         background: var(--bg);
         color: var(--text);
         overflow: hidden;
+      }
+
+      button,
+      input,
+      textarea,
+      select,
+      option,
+      pre,
+      code,
+      kbd,
+      samp {
+        font-family: var(--font-ui);
       }
 
       button,
@@ -58,7 +72,6 @@
 
       button:focus-visible,
       input:focus-visible,
-      textarea:focus-visible,
       select:focus-visible {
         box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.18);
       }
@@ -69,6 +82,16 @@
         height: 100vh;
         overflow: hidden;
         isolation: isolate;
+        --workspace-left: 0px;
+        --workspace-right: 0px;
+      }
+
+      .app.left-open {
+        --workspace-left: var(--left-w);
+      }
+
+      .app.right-open {
+        --workspace-right: var(--right-w);
       }
 
       .corner-toggle {
@@ -105,27 +128,50 @@
         pointer-events: none;
       }
 
+      .floating-docs-toggle {
+        position: fixed;
+        top: 12px;
+        right: 52px;
+        z-index: 160;
+        width: 32px;
+        height: 32px;
+        border: 0;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #5a6271;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      .floating-docs-toggle:hover {
+        background: #fff;
+      }
+
       .edge-toggle {
         position: fixed;
         top: 50%;
         z-index: 10000;
         transform: translateY(-50%);
-        width: 28px;
-        height: 54px;
-        border: 1px solid var(--line);
+        width: 12px;
+        height: 56px;
+        border: 0;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.95);
-        color: #6a7180;
+        background: rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(8px);
+        color: rgba(71, 85, 105, 0.52);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
         pointer-events: auto !important;
+        transition: background 120ms ease, color 120ms ease;
       }
 
       .edge-toggle:hover {
-        border-color: var(--line-strong);
-        background: #fff;
+        background: rgba(255, 255, 255, 0.2);
+        color: rgba(30, 41, 59, 0.92);
       }
 
       .edge-toggle.left { left: 0; }
@@ -142,11 +188,12 @@
         position: fixed;
         top: 0;
         bottom: 0;
-        z-index: 70;
+        z-index: 210;
         background: var(--panel-muted);
         box-shadow: var(--shadow);
         display: grid;
         pointer-events: none;
+        overflow: visible;
       }
 
       .left-rail {
@@ -174,6 +221,45 @@
 
       .app.right-open .right-rail {
         transform: translateX(0);
+        pointer-events: auto;
+      }
+
+      .rail-resize-handle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 8px;
+        cursor: col-resize;
+        touch-action: none;
+        background: transparent;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 3;
+      }
+
+      .rail-resize-handle::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 2px;
+        height: 48px;
+        transform: translate(-50%, -50%);
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.35);
+      }
+
+      .left-rail .rail-resize-handle {
+        right: -4px;
+      }
+
+      .right-rail .rail-resize-handle {
+        left: -4px;
+      }
+
+      .app.left-open .left-rail .rail-resize-handle,
+      .app.right-open .right-rail .rail-resize-handle {
+        opacity: 1;
         pointer-events: auto;
       }
 
@@ -272,9 +358,16 @@
       .thread-row.active { background: #e6ebf7; }
 
       .workspace {
-        position: relative;
-        width: 100%;
-        height: 100vh;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: var(--workspace-left);
+        right: var(--workspace-right);
+        width: auto;
+        height: auto;
+        transition: left 160ms ease, right 160ms ease;
+        overflow: hidden;
+        background: var(--panel);
       }
 
       .feed-wrap {
@@ -771,23 +864,55 @@
       }
 
       .bottom-dock {
-        position: fixed;
-        left: 50%;
-        bottom: 104px;
-        transform: translateX(-50%);
-        width: min(var(--composer-w), calc(100vw - 22px));
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto;
+        transform: translateY(calc(var(--dock-h) + 24px));
         border: 1px solid var(--line);
-        border-radius: 14px;
+        border-radius: 14px 14px 0 0;
         background: rgba(255, 255, 255, 0.98);
         box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
-        z-index: 95;
-        display: none;
+        z-index: 65;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        height: var(--dock-h);
         overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 140ms ease, transform 140ms ease;
       }
 
       .bottom-dock.open {
-        display: grid;
-        grid-template-rows: auto 1fr;
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
+
+      .dock-resize-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 12px;
+        border: 0;
+        background: transparent;
+        cursor: ns-resize;
+        touch-action: none;
+        z-index: 2;
+      }
+
+      .dock-resize-handle::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 4px;
+        width: 54px;
+        height: 4px;
+        border-radius: 999px;
+        transform: translateX(-50%);
+        background: #c2c9d6;
       }
 
       .dock-head {
@@ -795,7 +920,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 6px 8px;
+        padding: 12px 8px 6px;
         border-bottom: 1px solid var(--line);
       }
 
@@ -822,7 +947,7 @@
       }
 
       .dock-body {
-        max-height: 280px;
+        max-height: calc(var(--dock-h) - 42px);
         overflow: auto;
         padding: 8px;
       }
@@ -920,12 +1045,21 @@
       .line-btn:hover { background: #f4f7fc; }
 
       .composer-wrap {
-        position: fixed;
+        position: absolute;
         left: 50%;
         bottom: 12px;
         transform: translateX(-50%);
-        width: min(var(--composer-w), calc(100vw - 22px));
-        z-index: 70;
+        width: min(var(--composer-w), calc(100% - 22px));
+        z-index: 60;
+        transition: bottom 140ms ease;
+      }
+
+      .app.dock-open .composer-wrap {
+        bottom: calc(var(--dock-h) + 12px);
+      }
+
+      .app.dock-open .feed-wrap {
+        padding-bottom: calc(var(--dock-h) + 196px);
       }
 
       .composer-chips {
@@ -956,11 +1090,50 @@
       }
 
       .composer {
+        position: relative;
         border: 1px solid var(--line);
         border-radius: 18px;
         background: rgba(255, 255, 255, 0.98);
         box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
         overflow: visible;
+      }
+
+      .composer:focus-within {
+        border-color: #d5d9e3;
+      }
+
+      .composer-highlight {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        min-height: 56px;
+        max-height: 172px;
+        overflow: hidden;
+        pointer-events: none;
+        padding: 12px 14px 6px;
+        font-size: 16px;
+        line-height: 1.42;
+        letter-spacing: -0.005em;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text);
+        z-index: 1;
+        font-family: var(--font-ui);
+        margin: 0;
+      }
+
+      .composer-highlight .mention-known {
+        color: #1d4ed8;
+        font-weight: 600;
+        background: rgba(59, 130, 246, 0.14);
+        border-radius: 8px;
+        padding: 0 2px;
+      }
+
+      .composer-highlight .mention-unknown {
+        color: #7c3aed;
+        font-weight: 600;
       }
 
       .composer-input {
@@ -976,6 +1149,34 @@
         font-size: 16px;
         line-height: 1.42;
         letter-spacing: -0.005em;
+        position: relative;
+        z-index: 2;
+        color: transparent;
+        caret-color: var(--text);
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .composer-input::placeholder {
+        color: #6b7280;
+      }
+
+      .composer-input:focus,
+      .composer-input:focus-visible {
+        outline: none;
+        box-shadow: none;
+      }
+
+      body.is-resizing,
+      body.is-resizing * {
+        user-select: none;
+      }
+
+      body.is-resizing-col {
+        cursor: col-resize !important;
+      }
+
+      body.is-resizing-row {
+        cursor: ns-resize !important;
       }
 
       .composer-footer {
@@ -1317,10 +1518,14 @@
 
         .composer-wrap,
         .bottom-dock {
-          width: calc(100vw - 14px);
+          width: calc(100% - 14px);
+          left: 7px;
+          right: 7px;
         }
 
-        .bottom-dock { bottom: 96px; }
+        .composer-wrap {
+          transform: none;
+        }
 
         .settings-modal {
           width: 100vw;
@@ -1351,6 +1556,9 @@
       <button id="topLeftToggle" class="corner-toggle left" type="button" aria-label="Open left rail">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
       </button>
+      <button id="floatingDocsBtn" class="floating-docs-toggle" type="button" aria-label="Open docs drawer" title="Docs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M8 9h3"/></svg>
+      </button>
       <button id="topRightToggle" class="corner-toggle right" type="button" aria-label="Open right rail">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
       </button>
@@ -1363,6 +1571,7 @@
       </button>
 
       <aside class="left-rail" aria-label="Sidebar">
+        <div id="leftResizeHandle" class="rail-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize left rail"></div>
         <div class="rail-head">
           <button id="closeLeftBtn" class="ghost-icon" type="button" aria-label="Close left rail">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1379,7 +1588,7 @@
           </button>
           <button id="openSkillsBtn" class="rail-row" type="button">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 18l8 4 8-4"/></svg>
-            <span>Skills</span>
+            <span>Craft Skill</span>
           </button>
 
           <div class="section-head">
@@ -1404,11 +1613,13 @@
         </div>
 
         <section id="bottomDock" class="bottom-dock">
+          <button id="dockResizeHandle" class="dock-resize-handle" type="button" aria-label="Resize drawer"></button>
           <div class="dock-head">
             <div class="dock-tabs">
               <button class="tab-pill active" data-dock-tab="files" type="button">Files</button>
               <button class="tab-pill" data-dock-tab="docs" type="button">Docs</button>
               <button class="tab-pill" data-dock-tab="tables" type="button">Tables</button>
+              <button class="tab-pill" data-dock-tab="tools" type="button">Tools</button>
             </div>
             <button id="closeDockBtn" class="ghost-icon" type="button" aria-label="Close dock">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1418,12 +1629,14 @@
             <section id="dock-files" class="dock-panel active"></section>
             <section id="dock-docs" class="dock-panel"></section>
             <section id="dock-tables" class="dock-panel"></section>
+            <section id="dock-tools" class="dock-panel"></section>
           </div>
         </section>
 
         <div class="composer-wrap">
           <div id="composerChips" class="composer-chips"></div>
           <form id="composerForm" class="composer">
+            <pre id="composerHighlight" class="composer-highlight" aria-hidden="true"></pre>
             <textarea id="composerInput" class="composer-input" placeholder="Message team. Mention @Titus or enable Ask AI."></textarea>
             <div class="composer-footer">
               <div class="composer-left">
@@ -1453,6 +1666,15 @@
                 <button id="privateToggle" class="ghost-pill" type="button" aria-label="Private AI reply" title="Private AI reply">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
                 </button>
+                <button id="planModeToggle" class="ghost-pill" type="button" aria-label="Plan mode" title="Plan mode">
+                  <span>Plan</span>
+                </button>
+                <button id="approvalToggle" class="ghost-pill" type="button" aria-label="Require group approval" title="Require all approvals">
+                  <span>All approve</span>
+                </button>
+                <button id="pollBtn" class="ghost-pill" type="button" aria-label="Create poll" title="Create poll">
+                  <span>Poll</span>
+                </button>
               </div>
               <div class="composer-right">
                 <button id="micBtn" class="icon-btn" type="button" title="Mic">
@@ -1469,6 +1691,7 @@
       </main>
 
       <aside class="right-rail" aria-label="Context rail">
+        <div id="rightResizeHandle" class="rail-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize right rail"></div>
         <div class="right-head">
           <div class="right-tools">
             <button id="openDockDocsBtn" class="icon-btn" type="button" title="Docs">
@@ -1574,6 +1797,35 @@
         { value: "low", label: "Low" }
       ];
       const reactionEmojis = ["👍", "✅", "👀", "🔥", "💡", "📌", "🚫", "🎯"];
+      const providerOptions = [
+        { value: "managed", label: "Managed" },
+        { value: "openai", label: "OpenAI" },
+        { value: "anthropic", label: "Anthropic" },
+        { value: "gemini", label: "Gemini" }
+      ];
+      const modelStrategyPresets = [
+        { key: "balanced", label: "Balanced", provider: "managed", failoverChain: ["openai", "anthropic", "gemini"], llmMode: "managed" },
+        { key: "quality", label: "Highest quality", provider: "openai", failoverChain: ["anthropic", "gemini"], llmMode: "byo" },
+        { key: "cost", label: "Lowest cost", provider: "gemini", failoverChain: ["openai"], llmMode: "byo" }
+      ];
+      const analysisPresetOptions = [
+        { key: "revenue_forecast", name: "Revenue Forecast", objective: "forecast", targetMetricId: "revenue", horizonDays: 30, provider: "managed", params: { confidenceTarget: 0.82 } },
+        { key: "profit_forecast", name: "Profit Forecast", objective: "forecast", targetMetricId: "profit", horizonDays: 30, provider: "managed", params: { confidenceTarget: 0.8 } },
+        { key: "funnel_anomaly", name: "Funnel Anomaly", objective: "anomaly", targetMetricId: "funnel_conversion", horizonDays: 14, provider: "managed", params: { sensitivity: "medium" } },
+        { key: "pipeline_risk", name: "Pipeline Risk", objective: "attribution", targetMetricId: "pipeline_value", horizonDays: 21, provider: "managed", params: { confidenceTarget: 0.78 } }
+      ];
+      const layoutStorageKey = "insightfoundry.layout.v1";
+      const skillBuilderQuestions = [
+        { id: "name", label: "Skill name", prompt: "Name the skill (e.g., Deal Desk Reviewer)." },
+        { id: "description", label: "Description", prompt: "What outcome should this skill produce?" },
+        { id: "intents", label: "Intents", prompt: "List trigger intents (comma-separated)." },
+        { id: "channels", label: "Channels", prompt: "List channels (web, slack, telegram, discord, api)." },
+        { id: "tools", label: "Tools", prompt: "List allowed tools (model.run, reports.generate, sources.sync, compute.data_quality_snapshot)." },
+        { id: "confidenceMin", label: "Confidence", prompt: "Minimum confidence threshold (0-1)." },
+        { id: "budgetCapUsd", label: "Budget", prompt: "Budget cap in USD." },
+        { id: "humanApprovalFor", label: "Approval actions", prompt: "Actions requiring approval (comma-separated)." },
+        { id: "systemPrompt", label: "System prompt", prompt: "Write the core system prompt for this skill." }
+      ];
 
       const state = {
         tenantId: demoTenantId || "",
@@ -1599,10 +1851,20 @@
         connections: [],
         runs: [],
         installedSkills: [],
+        skillDrafts: [],
+        latestCraftedSkill: null,
+        skillBuilder: {
+          active: false,
+          stepIndex: 0,
+          answers: {},
+          draftId: null,
+          skillMd: ""
+        },
         automations: [],
         selectedAutomationId: null,
         automationRuns: [],
         modelProviderHealth: [],
+        modelKeyStatus: [],
         docsFiles: [],
         docsSession: null,
         docsAuthConnected: false,
@@ -1612,7 +1874,16 @@
         reportTemplates: [],
         selectedTemplateId: null,
         heartbeatByAutomationId: {},
+        soulDoc: null,
+        meDoc: null,
+        tools: [],
+        activeToolId: null,
+        channelThreadLinks: {
+          slack: [],
+          discord: []
+        },
         aiWorkingByThread: {},
+        aiApprovals: [],
         liveSyncEnabled: false,
         realtime: {
           socket: null,
@@ -1624,7 +1895,10 @@
         selectedEffort: "high",
         askAi: false,
         privateAi: false,
+        planMode: false,
+        requireGroupApproval: false,
         replyToMessageId: null,
+        replyThreadPersistent: false,
         rightTab: "attachments",
         settingsTab: "general",
         dockOpen: false,
@@ -1635,13 +1909,20 @@
         quickModal: {
           open: false,
           mode: null,
+          targetMemberId: null,
           title: "",
           label: "",
           placeholder: "",
           confirmLabel: "Create",
           value: "",
           error: ""
-        }
+        },
+        layout: {
+          leftWidth: 292,
+          rightWidth: 292,
+          dockHeight: 340
+        },
+        resizeSession: null
       };
 
       function toast(message) {
@@ -1666,10 +1947,132 @@
         return escapeHtml(value).replaceAll("`", "");
       }
 
+      function clamp(value, min, max) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return min;
+        return Math.min(max, Math.max(min, num));
+      }
+
+      function parseInlinePollInput(text = "") {
+        const raw = String(text || "").trim();
+        if (!raw.toLowerCase().startsWith("/poll ")) return null;
+        const content = raw.slice(6).trim();
+        if (!content) return null;
+        const parts = content.split("|").map((item) => item.trim()).filter(Boolean);
+        if (parts.length < 3) return null;
+        const [question, ...options] = parts;
+        return {
+          question,
+          options: options.slice(0, 12)
+        };
+      }
+
+      function pollTotalVotes(poll) {
+        return (poll?.options || []).reduce((sum, option) => sum + Number((option.voterIds || []).length), 0);
+      }
+
+      function getLayoutBounds() {
+        const viewportWidth = window.innerWidth || 1280;
+        const viewportHeight = window.innerHeight || 800;
+        const railMin = 220;
+        const railMax = Math.max(railMin + 24, Math.floor(viewportWidth * 0.44));
+        const dockMin = 180;
+        const dockMax = Math.max(dockMin + 32, Math.min(Math.floor(viewportHeight * 0.78), viewportHeight - 150));
+        return {
+          leftMin: railMin,
+          leftMax: railMax,
+          rightMin: railMin,
+          rightMax: railMax,
+          dockMin,
+          dockMax
+        };
+      }
+
+      function applyLayoutSizes() {
+        const app = document.getElementById("app");
+        if (!app) return;
+        const bounds = getLayoutBounds();
+        state.layout.leftWidth = clamp(state.layout.leftWidth, bounds.leftMin, bounds.leftMax);
+        state.layout.rightWidth = clamp(state.layout.rightWidth, bounds.rightMin, bounds.rightMax);
+        state.layout.dockHeight = clamp(state.layout.dockHeight, bounds.dockMin, bounds.dockMax);
+        app.style.setProperty("--left-w", `${Math.round(state.layout.leftWidth)}px`);
+        app.style.setProperty("--right-w", `${Math.round(state.layout.rightWidth)}px`);
+        app.style.setProperty("--dock-h", `${Math.round(state.layout.dockHeight)}px`);
+      }
+
+      function persistLayoutSizes() {
+        try {
+          localStorage.setItem(layoutStorageKey, JSON.stringify(state.layout));
+        } catch {}
+      }
+
+      function loadLayoutSizes() {
+        try {
+          const raw = localStorage.getItem(layoutStorageKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              state.layout.leftWidth = Number(parsed.leftWidth) || state.layout.leftWidth;
+              state.layout.rightWidth = Number(parsed.rightWidth) || state.layout.rightWidth;
+              state.layout.dockHeight = Number(parsed.dockHeight) || state.layout.dockHeight;
+            }
+          }
+        } catch {}
+        applyLayoutSizes();
+      }
+
+      function startResize(kind, event) {
+        event.preventDefault();
+        state.resizeSession = {
+          kind,
+          startX: event.clientX,
+          startY: event.clientY,
+          leftWidth: state.layout.leftWidth,
+          rightWidth: state.layout.rightWidth,
+          dockHeight: state.layout.dockHeight
+        };
+        document.body.classList.add("is-resizing", kind === "dock" ? "is-resizing-row" : "is-resizing-col");
+        document.getElementById("app")?.classList.add("is-resizing");
+      }
+
+      function stopResize() {
+        if (!state.resizeSession) return;
+        state.resizeSession = null;
+        document.body.classList.remove("is-resizing", "is-resizing-row", "is-resizing-col");
+        document.getElementById("app")?.classList.remove("is-resizing");
+        persistLayoutSizes();
+      }
+
+      function handleResizeMove(event) {
+        if (!state.resizeSession) return;
+        const session = state.resizeSession;
+        if (session.kind === "left") {
+          state.layout.leftWidth = session.leftWidth + (event.clientX - session.startX);
+        } else if (session.kind === "right") {
+          state.layout.rightWidth = session.rightWidth - (event.clientX - session.startX);
+        } else if (session.kind === "dock") {
+          state.layout.dockHeight = session.dockHeight - (event.clientY - session.startY);
+        }
+        applyLayoutSizes();
+      }
+
       function memberColor(memberId = "") {
         const manual = state.teamAppearance.find((item) => item.memberId === memberId);
         if (manual?.colorHex) return manual.colorHex;
-        const palette = ["#0f766e", "#0b57d0", "#a61e4d", "#7c2d12", "#3f6212", "#5b21b6", "#155e75", "#1f2937"];
+        const palette = [
+          "#2563eb",
+          "#7c3aed",
+          "#db2777",
+          "#ea580c",
+          "#0ea5e9",
+          "#16a34a",
+          "#d97706",
+          "#4f46e5",
+          "#0f766e",
+          "#be123c",
+          "#9333ea",
+          "#0284c7"
+        ];
         let hash = 0;
         for (let i = 0; i < memberId.length; i += 1) {
           hash = (hash << 5) - hash + memberId.charCodeAt(i);
@@ -1683,6 +2086,42 @@
           .map((match) => String(match[1] || "").toLowerCase().replace(/[^a-z0-9]+/g, ""));
       }
 
+      function isKnownMentionToken(token = "") {
+        const normalized = String(token || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+        if (!normalized) return false;
+        const agentAliases = new Set([
+          String(state.workspaceAgent?.name || "Titus").toLowerCase().replace(/[^a-z0-9]+/g, ""),
+          ...(Array.isArray(state.workspaceAgent?.mentionAliases) ? state.workspaceAgent.mentionAliases : ["titus"])
+        ].map((value) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim()).filter(Boolean));
+        if (agentAliases.has(normalized)) return true;
+        return (state.team || []).some((member) => {
+          const fromId = String(member.id || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+          const fromName = String(member.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+          return normalized === fromId || normalized === fromName;
+        });
+      }
+
+      function renderComposerHighlightText(text = "") {
+        const escaped = escapeHtml(text || "");
+        if (!escaped) return "";
+        return escaped.replace(/@([a-zA-Z0-9._-]{2,64})/g, (full, token) => {
+          const known = isKnownMentionToken(token);
+          const cls = known ? "mention-known" : "mention-unknown";
+          return `<span class="${cls}">@${escapeHtml(token)}</span>`;
+        });
+      }
+
+      function syncComposerHighlight() {
+        const input = document.getElementById("composerInput");
+        const highlight = document.getElementById("composerHighlight");
+        if (!input || !highlight) return;
+        const text = String(input.value || "");
+        highlight.innerHTML = text
+          ? renderComposerHighlightText(text + (text.endsWith("\n") ? " " : ""))
+          : "";
+        highlight.scrollTop = input.scrollTop;
+      }
+
       function hasAgentMention(text = "") {
         const aliases = new Set([
           String(state.workspaceAgent?.name || "Titus").toLowerCase().replace(/[^a-z0-9]+/g, ""),
@@ -1690,6 +2129,106 @@
         ].map((entry) => String(entry || "").toLowerCase().replace(/[^a-z0-9]+/g, "")).filter(Boolean));
         const mentions = parseMentionTokens(text);
         return mentions.some((token) => aliases.has(token));
+      }
+
+      function providerFromModelPreset(value = "") {
+        const preset = String(value || "").toLowerCase();
+        if (!preset || preset === "auto") return "";
+        if (preset.includes("gpt") || preset.includes("openai")) return "openai";
+        if (preset.includes("claude") || preset.includes("anthropic")) return "anthropic";
+        if (preset.includes("gemini") || preset.includes("google")) return "gemini";
+        return preset;
+      }
+
+      function modelPresetFromProvider(provider = "") {
+        const normalized = String(provider || "").toLowerCase();
+        if (normalized === "openai") return "gpt-5-codex";
+        if (normalized === "anthropic") return "claude-sonnet";
+        if (normalized === "gemini" || normalized === "google") return "gemini-2.5";
+        return "auto";
+      }
+
+      function slugifySkillId(name = "") {
+        return String(name || "custom-skill")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 70) || "custom-skill";
+      }
+
+      function parseCsv(value = "") {
+        return String(value || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      function currentSkillBuilderQuestion() {
+        return skillBuilderQuestions[state.skillBuilder.stepIndex] || null;
+      }
+
+      function buildSkillManifestFromAnswers(answers = {}) {
+        const name = String(answers.name || "Custom Skill").trim() || "Custom Skill";
+        const channels = parseCsv(answers.channels).map((item) => item.toLowerCase());
+        const validChannels = channels.filter((item) => ["web", "slack", "telegram", "discord", "api", "email"].includes(item));
+        const intents = parseCsv(answers.intents).map((item) => item.toLowerCase().replace(/[^a-z0-9_:-]+/g, "_"));
+        const tools = parseCsv(answers.tools).map((toolId) => ({
+          id: toolId.startsWith("custom.") || toolId.includes(".") ? toolId : `custom.${toolId}`,
+          allow: true
+        }));
+        return {
+          id: slugifySkillId(name),
+          version: "1.0.0",
+          name,
+          description: String(answers.description || "Custom tenant skill").trim() || "Custom tenant skill",
+          triggers: {
+            intents: intents.length ? intents : ["custom_intent"],
+            channels: validChannels.length ? validChannels : ["web", "api"]
+          },
+          tools: tools.length ? tools : [{ id: "model.run", allow: true }],
+          guardrails: {
+            confidenceMin: Math.max(0, Math.min(1, Number(answers.confidenceMin || 0.7))),
+            humanApprovalFor: parseCsv(answers.humanApprovalFor),
+            budgetCapUsd: Number(answers.budgetCapUsd || 10000),
+            tokenBudget: 2400,
+            timeBudgetMs: 8000,
+            killSwitch: false
+          },
+          prompts: {
+            system: String(answers.systemPrompt || "Use available tenant data to return evidence-based recommendations.")
+          },
+          schedules: []
+        };
+      }
+
+      function buildSkillMarkdown(manifest) {
+        const safeManifest = manifest || {};
+        return [
+          `# ${safeManifest.name || "Custom Skill"}`,
+          "",
+          `id: ${safeManifest.id || "custom-skill"}`,
+          `version: ${safeManifest.version || "1.0.0"}`,
+          "",
+          "## Description",
+          safeManifest.description || "",
+          "",
+          "## Triggers",
+          `intents: ${(safeManifest.triggers?.intents || []).join(", ")}`,
+          `channels: ${(safeManifest.triggers?.channels || []).join(", ")}`,
+          "",
+          "## Tools",
+          ...(safeManifest.tools || []).map((tool) => `- ${tool.id} (allow=${tool.allow ? "true" : "false"})`),
+          "",
+          "## Guardrails",
+          `confidenceMin: ${safeManifest.guardrails?.confidenceMin ?? 0.7}`,
+          `budgetCapUsd: ${safeManifest.guardrails?.budgetCapUsd ?? 10000}`,
+          `humanApprovalFor: ${(safeManifest.guardrails?.humanApprovalFor || []).join(", ")}`,
+          "",
+          "## Prompts",
+          "```txt",
+          safeManifest.prompts?.system || "",
+          "```"
+        ].join("\n");
       }
 
       function headers(extra = {}, includeJson = true) {
@@ -1773,7 +2312,8 @@
           installedRes,
           workspaceAgentRes,
           automationsRunsRes,
-          onboardingRes
+          onboardingRes,
+          skillDraftsRes
         ] = await Promise.all([
           api("/v1/settings"),
           api("/v1/settings/team"),
@@ -1785,10 +2325,15 @@
           api("/v1/skills/installed"),
           api("/v1/settings/workspace-agent"),
           api("/v1/automations/runs"),
-          api("/v1/workspace/onboarding")
+          api("/v1/workspace/onboarding"),
+          api("/v1/skills/drafts")
         ]);
 
         state.settings = settingsRes.settings || null;
+        const configuredProvider = state.settings?.modelPreferences?.defaultProvider;
+        if (configuredProvider) {
+          state.selectedModelPreset = modelPresetFromProvider(configuredProvider);
+        }
         state.team = teamRes.team || [];
         state.teamAppearance = teamRes.appearance || [];
         state.profiles = profilesRes.profiles || [];
@@ -1800,6 +2345,20 @@
         state.workspaceAgent = workspaceAgentRes.profile || null;
         state.automationRuns = automationsRunsRes.runs || [];
         state.onboarding = onboardingRes.onboarding || null;
+        state.skillDrafts = skillDraftsRes.drafts || [];
+        if (!state.latestCraftedSkill && state.skillDrafts.length) {
+          const latestDraft = state.skillDrafts
+            .slice()
+            .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0];
+          if (latestDraft?.manifest) {
+            state.latestCraftedSkill = {
+              draftId: latestDraft.draftId,
+              manifest: latestDraft.manifest,
+              skillMd: buildSkillMarkdown(latestDraft.manifest),
+              generation: latestDraft.generation || null
+            };
+          }
+        }
 
         const owner = state.team.find((member) => member.role === "owner") || state.team[0];
         if (owner) {
@@ -1815,6 +2374,27 @@
         }
 
         try {
+          const modelKeysRes = await api("/v1/settings/model-keys");
+          state.modelKeyStatus = modelKeysRes.keys || [];
+        } catch {
+          state.modelKeyStatus = [];
+        }
+
+        try {
+          const soulRes = await api("/v1/workspace/soul");
+          state.soulDoc = soulRes.soul || null;
+        } catch {
+          state.soulDoc = null;
+        }
+
+        try {
+          const meRes = await api("/v1/workspace/me");
+          state.meDoc = meRes.me || null;
+        } catch {
+          state.meDoc = null;
+        }
+
+        try {
           const templatesRes = await api("/v1/reports/templates");
           state.reportTemplates = templatesRes.templates || [];
           if (!state.selectedTemplateId || !state.reportTemplates.some((item) => item.id === state.selectedTemplateId)) {
@@ -1822,6 +2402,19 @@
           }
         } catch {
           state.reportTemplates = [];
+        }
+
+        try {
+          const [slackLinksRes, discordLinksRes] = await Promise.all([
+            api("/v1/channels/slack/thread-links"),
+            api("/v1/channels/discord/thread-links")
+          ]);
+          state.channelThreadLinks = {
+            slack: slackLinksRes.links || [],
+            discord: discordLinksRes.links || []
+          };
+        } catch {
+          state.channelThreadLinks = { slack: [], discord: [] };
         }
       }
 
@@ -1855,6 +2448,19 @@
         }
       }
 
+      async function loadToolsData() {
+        try {
+          const toolsRes = await api("/v1/workspace/tools");
+          state.tools = toolsRes.tools || [];
+          if (!state.activeToolId || !state.tools.some((item) => item.id === state.activeToolId)) {
+            state.activeToolId = state.tools[0]?.id || null;
+          }
+        } catch {
+          state.tools = [];
+          state.activeToolId = null;
+        }
+      }
+
       async function loadAutomationsForActiveFolder() {
         if (!state.activeFolderId) {
           state.automations = [];
@@ -1878,15 +2484,18 @@
           state.messages = [];
           state.repliesByParent = {};
           state.attachments = [];
+          state.aiApprovals = [];
           await loadFolderAttachments();
           return;
         }
-        const [messagesRes, attachmentsRes] = await Promise.all([
+        const [messagesRes, attachmentsRes, approvalsRes] = await Promise.all([
           api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/messages`),
-          api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/attachments`)
+          api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/attachments`),
+          api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/ai-approvals`)
         ]);
         state.messages = messagesRes.messages || [];
         state.attachments = attachmentsRes.attachments || [];
+        state.aiApprovals = approvalsRes.approvals || [];
         const working = state.aiWorkingByThread[state.activeThreadId];
         if (working) {
           const hasAgentReply = state.messages.some((item) =>
@@ -1947,7 +2556,7 @@
         await loadSettings();
         await loadAutomationsForActiveFolder();
         await loadThreadData();
-        await Promise.all([loadDocsData(), loadTablesData()]);
+        await Promise.all([loadDocsData(), loadTablesData(), loadToolsData()]);
       }
 
       function scheduleRefresh(kind = "thread", delayMs = 140) {
@@ -1963,6 +2572,8 @@
               await loadDocsData();
             } else if (kind === "tables") {
               await loadTablesData();
+            } else if (kind === "tools") {
+              await loadToolsData();
             }
             renderAll();
           } catch {}
@@ -2002,7 +2613,15 @@
           scheduleRefresh("settings", 120);
           return;
         }
-        if (type === "chat.message_created" || type === "chat.reply_created" || type === "chat.reaction_added" || type === "chat.reaction_removed") {
+        if (
+          type === "chat.message_created"
+          || type === "chat.reply_created"
+          || type === "chat.reaction_added"
+          || type === "chat.reaction_removed"
+          || type === "chat.poll_voted"
+          || type === "chat.ai_approval_requested"
+          || type === "chat.ai_approval_updated"
+        ) {
           scheduleRefresh("thread", 40);
           if (type === "chat.message_created" || type === "chat.reply_created") {
             scheduleRefresh("settings", 120);
@@ -2019,6 +2638,10 @@
         }
         if (type.startsWith("workspace.table_")) {
           scheduleRefresh("tables", 80);
+          return;
+        }
+        if (type.startsWith("workspace.tool_")) {
+          scheduleRefresh("tools", 80);
         }
       }
 
@@ -2069,6 +2692,7 @@
         state.dockOpen = open;
         if (tab) state.dockTab = tab;
         document.getElementById("bottomDock").classList.toggle("open", open);
+        document.getElementById("app").classList.toggle("dock-open", open);
         document.querySelectorAll("[data-dock-tab]").forEach((btn) => {
           btn.classList.toggle("active", btn.dataset.dockTab === state.dockTab);
         });
@@ -2165,6 +2789,17 @@
         return `${(value / (1024 * 1024)).toFixed(1)} MB`;
       }
 
+      function isLongReplyBody(body = "") {
+        const text = String(body || "");
+        return text.length > 320 || text.split("\n").length > 6;
+      }
+
+      function truncateReplyBody(body = "", limit = 260) {
+        const text = String(body || "");
+        if (text.length <= limit) return text;
+        return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+      }
+
       function inferColumnsFromRows(rows = []) {
         const keys = new Set();
         for (const row of rows) {
@@ -2182,6 +2817,146 @@
           deliver_report: "Deliver"
         };
         return map[actionId] || "Open";
+      }
+
+      function buildSettingsAudit() {
+        const prefs = state.settings?.modelPreferences || {};
+        const channels = state.settings?.channels || {};
+        const activeProfile = (state.profiles || []).find((item) => item.active);
+        const checks = [
+          {
+            id: "connections",
+            label: "Data connection",
+            ok: (state.connections || []).length > 0,
+            hint: (state.connections || []).length ? `${state.connections.length} active` : "No source connected yet",
+            tab: "connections"
+          },
+          {
+            id: "models",
+            label: "LLM provider",
+            ok: Boolean(prefs.defaultProvider),
+            hint: prefs.defaultProvider ? `${prefs.llmMode || "managed"} · ${prefs.defaultProvider}` : "Pick default provider",
+            tab: "models"
+          },
+          {
+            id: "analysis-profiles",
+            label: "Analysis profile",
+            ok: Boolean(activeProfile),
+            hint: activeProfile ? `${activeProfile.name} active` : "No active profile",
+            tab: "analysis-profiles"
+          },
+          {
+            id: "reports",
+            label: "Report template",
+            ok: (state.reportTemplates || []).length > 0,
+            hint: (state.reportTemplates || []).length ? `${state.reportTemplates.length} templates` : "Upload markdown template",
+            tab: "reports"
+          },
+          {
+            id: "channels",
+            label: "Delivery channel",
+            ok: Boolean(channels.slack?.enabled || channels.telegram?.enabled || channels.discord?.enabled),
+            hint: channels.slack?.enabled || channels.telegram?.enabled || channels.discord?.enabled ? "Delivery enabled" : "No channel enabled",
+            tab: "channels"
+          }
+        ];
+        const done = checks.filter((check) => check.ok).length;
+        return { checks, done, total: checks.length, percent: Math.round((done / Math.max(1, checks.length)) * 100) };
+      }
+
+      function resetLayoutSizes() {
+        state.layout.leftWidth = 292;
+        state.layout.rightWidth = 292;
+        state.layout.dockHeight = 340;
+        applyLayoutSizes();
+        persistLayoutSizes();
+      }
+
+      async function applyRecommendedSetup() {
+        const existingSources = new Set((state.connections || []).map((connection) => String(connection.sourceType || "").toLowerCase()));
+        if (!existingSources.has("google_ads")) {
+          await api("/v1/integrations/quick-add", {
+            method: "POST",
+            body: { integrationKey: "google_ads", authRef: "quick_ads_token", runInitialSync: true, periodDays: 21 }
+          });
+        }
+        if (!existingSources.has("stripe")) {
+          await api("/v1/integrations/quick-add", {
+            method: "POST",
+            body: { integrationKey: "stripe", authRef: "quick_stripe_token", runInitialSync: true, periodDays: 21 }
+          });
+        }
+
+        const strategy = modelStrategyPresets[0];
+        const existingRefs = Array.isArray(state.settings?.modelPreferences?.byoKeyRefs)
+          ? state.settings.modelPreferences.byoKeyRefs
+          : [];
+        await api("/v1/settings/model-preferences", {
+          method: "PATCH",
+          body: {
+            llmMode: strategy.llmMode,
+            defaultProvider: strategy.provider,
+            failoverChain: strategy.failoverChain,
+            byoKeyRefs: existingRefs
+          }
+        });
+        state.selectedModelPreset = modelPresetFromProvider(strategy.provider);
+
+        const primaryPreset = analysisPresetOptions[0];
+        let activeProfile = (state.profiles || []).find((profile) => profile.active);
+        if (!activeProfile) {
+          let profile = (state.profiles || []).find((item) => item.name.toLowerCase() === primaryPreset.name.toLowerCase());
+          if (!profile) {
+            const created = await api("/v1/models/profiles", {
+              method: "POST",
+              body: {
+                name: primaryPreset.name,
+                objective: primaryPreset.objective,
+                targetMetricId: primaryPreset.targetMetricId,
+                horizonDays: primaryPreset.horizonDays,
+                provider: primaryPreset.provider,
+                params: primaryPreset.params,
+                active: false
+              }
+            });
+            profile = created.profile;
+          }
+          if (profile?.id) {
+            await api(`/v1/models/profiles/${encodeURIComponent(profile.id)}/activate`, { method: "POST", body: {} });
+          }
+        }
+
+        if (!(state.reportTemplates || []).length) {
+          await api("/v1/reports/templates/upload", {
+            method: "POST",
+            body: {
+              name: "Executive Default",
+              body: [
+                "# Executive Summary",
+                "",
+                "{{summary}}",
+                "",
+                "## KPI Snapshot",
+                "{{kpi_snapshot}}",
+                "",
+                "## Actions",
+                "{{actions}}"
+              ].join("\n")
+            }
+          });
+        }
+
+        const fastActions = new Set(["connect_source", "configure_llm", "choose_profile"]);
+        for (const step of state.onboarding?.steps || []) {
+          if (step?.status === "done" || !step?.actionId || !fastActions.has(step.actionId)) continue;
+          try {
+            await api(`/v1/workspace/onboarding/actions/${encodeURIComponent(step.actionId)}`, { method: "POST", body: {} });
+          } catch {}
+        }
+
+        await loadAll();
+        renderAll();
+        setSettingsTab("general");
       }
 
       function renderThreadTree() {
@@ -2212,6 +2987,7 @@
             const thread = state.threads.find((item) => item.id === state.activeThreadId);
             if (thread) state.activeFolderId = thread.folderId;
             state.replyToMessageId = null;
+            state.replyThreadPersistent = false;
             await loadAutomationsForActiveFolder();
             await loadThreadData();
             renderAll();
@@ -2250,6 +3026,28 @@
         `;
       }
 
+      function renderSkillBuilderCard() {
+        const sb = state.skillBuilder;
+        const question = currentSkillBuilderQuestion();
+        if (!sb.active && !sb.skillMd) return "";
+        if (!sb.active && sb.skillMd) {
+          return `
+            <section class="onboarding-card">
+              <div class="onboarding-title">Skill builder output</div>
+              <div class="stamp">Draft created: ${escapeHtml(sb.draftId || "none")}</div>
+              <pre style="white-space:pre-wrap; font-size:12px; margin:8px 0 0;">${escapeHtml(sb.skillMd)}</pre>
+            </section>
+          `;
+        }
+        return `
+          <section class="onboarding-card">
+            <div class="onboarding-title">Private Skill Builder (${sb.stepIndex + 1}/${skillBuilderQuestions.length})</div>
+            <div style="font-size:13px; line-height:1.4; color:#374151;">${escapeHtml(question?.prompt || "Answer in the chat box to continue.")}</div>
+            <div class="stamp" style="margin-top:6px;">Replies are sent as private Ask AI with ${escapeHtml(state.workspaceAgent?.name || "Titus")}.</div>
+          </section>
+        `;
+      }
+
       function renderFeed() {
         const feed = document.getElementById("feed");
         if (!feed) return;
@@ -2261,6 +3059,7 @@
         }
 
         const onboardingHtml = renderOnboardingCard();
+        const skillBuilderHtml = renderSkillBuilderCard();
         const working = state.aiWorkingByThread[state.activeThreadId];
         const workingHtml = working
           ? `
@@ -2282,11 +3081,34 @@
             <div class="hf-detail-row"><dt class="hf-detail-key">Pending files</dt><dd class="hf-detail-val">${Number(state.pendingAssets.length)}</dd></div>
           </div>
         `;
+        const approvalsHtml = (state.aiApprovals || []).length
+          ? `
+            <section class="onboarding-card" style="margin-bottom:12px;">
+              <div class="onboarding-title">AI approvals</div>
+              ${(state.aiApprovals || []).slice(0, 8).map((approval) => {
+                const required = Number(approval.requiredUserIds?.length || 0);
+                const approved = Number(approval.approvedUserIds?.length || 0);
+                const mine = (approval.approvedUserIds || []).includes(state.currentUserId);
+                const canApprove = approval.status === "pending" && !mine && (approval.requiredUserIds || []).includes(state.currentUserId);
+                return `
+                  <div class="onboarding-step ${approval.status === "completed" ? "done" : "pending"}">
+                    <div>
+                      <div>${escapeHtml(approval.status === "completed" ? "Completed" : "Pending")} • ${approved}/${required} approvals</div>
+                      <div class="stamp">message ${escapeHtml((approval.messageId || "").slice(0, 10))}</div>
+                    </div>
+                    ${canApprove ? `<button class="mini-action" type="button" data-approve-ai="${approval.id}">Approve</button>` : `<span class="stamp">${mine ? "Approved" : escapeHtml(approval.status)}</span>`}
+                  </div>
+                `;
+              }).join("")}
+            </section>
+          `
+          : "";
 
         if (!state.messages.length) {
           feed.innerHTML = `
             <div class="thread-title">${escapeHtml(thread.title)}</div>
             ${onboardingHtml}
+            ${skillBuilderHtml}
             ${contextList}
             ${workingHtml}
             <div class="empty">Start the conversation.</div>
@@ -2298,7 +3120,11 @@
         const messages = state.messages.map((message) => {
           const replies = state.repliesByParent[message.id]?.replies || [];
           const firstReply = replies[0] || null;
-          const extraReplyCount = Math.max(0, replies.length - 1);
+          const longFirstReply = firstReply ? isLongReplyBody(firstReply.body || "") : false;
+          const replyPreviewBody = firstReply
+            ? (longFirstReply ? truncateReplyBody(firstReply.body || "") : (firstReply.body || ""))
+            : "";
+          const showOpenThread = replies.length > 0;
           const replyHtml = firstReply
             ? `
               <div class="inline-reply">
@@ -2306,14 +3132,36 @@
                   <span class="author" style="color:${memberColor(firstReply.authorId || "reply")};">${escapeHtml(firstReply.authorName || "Reply")}</span>
                   <span class="stamp">${escapeHtml(timeLabel(firstReply.createdAt))}</span>
                 </div>
-                <div class="message-body">${escapeHtml(firstReply.body || "")}</div>
-                ${extraReplyCount > 0 ? `<button class="link-btn" type="button" data-open-mini="${message.id}">Open thread (${extraReplyCount + 1})</button>` : ""}
+                <div class="message-body">${escapeHtml(replyPreviewBody)}</div>
+                ${showOpenThread ? `<button class="link-btn" type="button" data-open-mini="${message.id}">Open thread (${Number(replies.length)})</button>` : ""}
               </div>
             `
             : "";
 
           const attachmentHtml = Array.isArray(message.attachments) && message.attachments.length
             ? `<div class="stamp" style="margin-top:4px;">${message.attachments.length} attachment${message.attachments.length > 1 ? "s" : ""}</div>`
+            : "";
+          const poll = message.poll;
+          const pollHtml = poll
+            ? `
+              <div class="hf-detail-list" style="margin-top:8px;">
+                <div class="hf-detail-row"><dt class="hf-detail-key">Poll</dt><dd class="hf-detail-val">${escapeHtml(poll.question || "")}</dd></div>
+                ${(poll.options || []).map((option) => {
+                  const count = Number(option.voterIds?.length || 0);
+                  const mine = (option.voterIds || []).includes(state.currentUserId);
+                  return `
+                    <div class="hf-detail-row">
+                      <dt class="hf-detail-key">${mine ? "✓" : ""}</dt>
+                      <dd class="hf-detail-val">
+                        <button class="line-btn" type="button" data-poll-vote="${message.id}:${option.id}" ${poll.closed ? "disabled" : ""}>${escapeHtml(option.label)}</button>
+                        <span class="stamp">${count}</span>
+                      </dd>
+                    </div>
+                  `;
+                }).join("")}
+                <div class="stamp" style="margin-top:4px;">${pollTotalVotes(poll)} total vote${pollTotalVotes(poll) === 1 ? "" : "s"}</div>
+              </div>
+            `
             : "";
           const reactions = Array.isArray(message.reactions) ? message.reactions : [];
           const reactionsHtml = `
@@ -2344,6 +3192,7 @@
                 ${message.privateHidden || message.isPrivateMarker ? '<span class="stamp">private</span>' : ""}
               </div>
               <div class="message-body">${escapeHtml(message.body || "")}</div>
+              ${pollHtml}
               ${attachmentHtml}
               <div class="message-actions">
                 <button class="link-btn" type="button" data-reply-id="${message.id}">Reply</button>
@@ -2357,7 +3206,9 @@
         feed.innerHTML = `
           <div class="thread-title">${escapeHtml(thread.title)}</div>
           ${onboardingHtml}
+          ${skillBuilderHtml}
           ${contextList}
+          ${approvalsHtml}
           ${workingHtml}
           ${messages}
         `;
@@ -2367,6 +3218,7 @@
         feed.querySelectorAll("[data-reply-id]").forEach((button) => {
           button.onclick = () => {
             state.replyToMessageId = button.dataset.replyId;
+            state.replyThreadPersistent = false;
             const input = document.getElementById("composerInput");
             if (input) {
               input.placeholder = "Reply in thread";
@@ -2381,9 +3233,16 @@
             const messageId = button.dataset.openMini;
             const mini = state.repliesByParent[messageId];
             if (!mini?.replies?.length) return;
-            setRightOpen(true);
-            setRightTab("notifications");
-            toast(`Mini-thread replies: ${mini.replies.length}`);
+            state.replyToMessageId = messageId;
+            state.replyThreadPersistent = true;
+            state.askAi = true;
+            document.getElementById("askAiToggle")?.classList.add("active");
+            const input = document.getElementById("composerInput");
+            if (input) {
+              input.placeholder = "Thread mode: continue with @Titus here (Esc to exit)";
+              input.focus();
+            }
+            toast(`Thread mode enabled (${mini.replies.length} replies)`);
           };
         });
 
@@ -2432,6 +3291,38 @@
               renderFeed();
             } catch (error) {
               toast(error.message || "Reaction update failed");
+            }
+          };
+        });
+
+        feed.querySelectorAll("[data-poll-vote]").forEach((button) => {
+          button.onclick = async () => {
+            const [messageId, optionId] = String(button.dataset.pollVote || "").split(":");
+            if (!messageId || !optionId) return;
+            try {
+              await api(`/v1/workspace/chat/messages/${encodeURIComponent(messageId)}/poll-vote`, {
+                method: "POST",
+                body: { optionIds: [optionId] }
+              });
+              await loadThreadData();
+              renderFeed();
+            } catch (error) {
+              toast(error.message || "Poll vote failed");
+            }
+          };
+        });
+
+        feed.querySelectorAll("[data-approve-ai]").forEach((button) => {
+          button.onclick = async () => {
+            try {
+              await api(`/v1/workspace/chat/approvals/${encodeURIComponent(button.dataset.approveAi)}/approve`, {
+                method: "POST",
+                body: {}
+              });
+              await loadThreadData();
+              renderFeed();
+            } catch (error) {
+              toast(error.message || "Approval failed");
             }
           };
         });
@@ -2837,6 +3728,85 @@
         }
       }
 
+      async function renderDockTools() {
+        const panel = document.getElementById("dock-tools");
+        if (!panel) return;
+        const toolOptions = (state.tools || []).map((tool) => `
+          <option value="${tool.id}" ${tool.id === state.activeToolId ? "selected" : ""}>${escapeHtml(tool.name)}</option>
+        `).join("");
+        const activeTool = state.tools.find((item) => item.id === state.activeToolId) || null;
+        panel.innerHTML = `
+          <div class="field">
+            <label>Prompt to build a quick web tool</label>
+            <textarea id="toolPromptInput" style="min-height:110px;" placeholder="Build a lightweight deal desk risk calculator with margin and discount sliders."></textarea>
+          </div>
+          <div class="row">
+            <div class="field"><label>Tool name</label><input id="toolNameInput" value="${escapeAttr(activeTool?.name || "Quick Tool")}" /></div>
+            <div class="field"><label>Provider (optional)</label><input id="toolProviderInput" placeholder="openai | anthropic | gemini" /></div>
+          </div>
+          <div class="line-actions" style="margin-bottom:8px;">
+            <button id="generateToolBtn" class="line-btn" type="button">Generate tool</button>
+            <select id="toolsSelect" class="line-btn" style="min-width:220px;">${toolOptions || '<option value="">No generated tools yet</option>'}</select>
+            <button id="openToolInNewTabBtn" class="line-btn" type="button">Open in new tab</button>
+          </div>
+          ${activeTool?.warning ? `<div class="stamp" style="margin-bottom:8px;">${escapeHtml(activeTool.warning)}</div>` : ""}
+          <iframe class="doc-preview-frame" style="min-height:320px;" srcdoc="${escapeAttr(activeTool?.html || "<!doctype html><html><body style='font-family:Sohne,SF Pro Text,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:20px;'>No tool generated yet.</body></html>")}"></iframe>
+        `;
+
+        const generateBtn = document.getElementById("generateToolBtn");
+        if (generateBtn) {
+          generateBtn.onclick = async () => {
+            const prompt = document.getElementById("toolPromptInput")?.value || "";
+            const name = document.getElementById("toolNameInput")?.value || "Quick Tool";
+            const provider = document.getElementById("toolProviderInput")?.value || "";
+            if (!String(prompt).trim()) {
+              toast("Enter a prompt first");
+              return;
+            }
+            const generated = await api("/v1/workspace/tools/generate", {
+              method: "POST",
+              body: {
+                prompt,
+                name,
+                provider: provider || undefined,
+                threadId: state.activeThreadId || undefined
+              }
+            });
+            state.activeToolId = generated.tool.id;
+            await loadToolsData();
+            await renderDockTools();
+            toast(generated.tool.mode === "llm" ? "Tool generated with model" : "Fallback tool scaffold generated");
+          };
+        }
+
+        const toolsSelect = document.getElementById("toolsSelect");
+        if (toolsSelect) {
+          toolsSelect.onchange = async () => {
+            state.activeToolId = toolsSelect.value || null;
+            await renderDockTools();
+          };
+        }
+
+        const openBtn = document.getElementById("openToolInNewTabBtn");
+        if (openBtn) {
+          openBtn.onclick = () => {
+            const selected = state.tools.find((item) => item.id === state.activeToolId);
+            if (!selected?.html) {
+              toast("No tool selected");
+              return;
+            }
+            const popup = window.open("", "_blank", "noopener,noreferrer");
+            if (!popup) {
+              toast("Popup blocked");
+              return;
+            }
+            popup.document.open();
+            popup.document.write(selected.html);
+            popup.document.close();
+          };
+        }
+      }
+
       function renderRightAttachments() {
         const panel = document.getElementById("right-attachments");
         if (!panel) return;
@@ -2998,8 +3968,48 @@
         if (!root || !state.settings) return;
         const general = state.settings.general || {};
         const agent = state.workspaceAgent || {};
+        const audit = buildSettingsAudit();
+        const auditRows = audit.checks.map((check) => `
+          <div class="hf-detail-row">
+            <dt class="hf-detail-key">${escapeHtml(check.label)}</dt>
+            <dd class="hf-detail-val">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                <span>${escapeHtml(check.hint)}</span>
+                <button class="line-btn" type="button" data-audit-open-tab="${check.tab}">${check.ok ? "Review" : "Fix"}</button>
+              </div>
+            </dd>
+          </div>
+        `).join("");
         root.innerHTML = `
           <div class="hf-accordion">
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>Setup audit (${audit.done}/${audit.total})</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                <div class="hf-stats" style="margin-bottom:8px;">
+                  <article class="hf-stat">
+                    <div class="hf-stat-kicker">Setup completion</div>
+                    <div class="hf-stat-value">${audit.percent}%</div>
+                    <div class="hf-stat-trend">${audit.done} of ${audit.total} essentials configured</div>
+                  </article>
+                  <article class="hf-stat">
+                    <div class="hf-stat-kicker">Next recommended step</div>
+                    <div class="hf-stat-value" style="font-size:16px;">${escapeHtml((audit.checks.find((check) => !check.ok)?.label || "Start first run"))}</div>
+                    <div class="hf-stat-trend">Move to that section to finish setup.</div>
+                  </article>
+                </div>
+                <div class="hf-detail-list">${auditRows}</div>
+                <div class="line-actions">
+                  <button id="runRecommendedSetupBtn" class="line-btn" type="button">Apply recommended setup</button>
+                  <button id="openModelsFromAuditBtn" class="line-btn" type="button">Optimize model setup</button>
+                  <button id="openProfilesFromAuditBtn" class="line-btn" type="button">Manage analysis profiles</button>
+                  <button id="openReportsFromAuditBtn" class="line-btn" type="button">Open report templates</button>
+                  <button id="resetLayoutBtn" class="line-btn" type="button">Reset layout sizes</button>
+                </div>
+              </div>
+            </details>
             <details class="hf-acc-item" open>
               <summary class="hf-acc-summary">
                 <span>Workspace identity</span>
@@ -3028,6 +4038,40 @@
             </details>
           </div>
         `;
+
+        root.querySelectorAll("[data-audit-open-tab]").forEach((button) => {
+          button.onclick = () => setSettingsTab(button.dataset.auditOpenTab);
+        });
+        const runRecommendedSetupBtn = document.getElementById("runRecommendedSetupBtn");
+        if (runRecommendedSetupBtn) {
+          runRecommendedSetupBtn.onclick = async () => {
+            runRecommendedSetupBtn.disabled = true;
+            const original = runRecommendedSetupBtn.textContent;
+            runRecommendedSetupBtn.textContent = "Applying...";
+            try {
+              await applyRecommendedSetup();
+              toast("Recommended setup applied");
+            } catch (error) {
+              toast(error.message || "Recommended setup failed");
+            } finally {
+              runRecommendedSetupBtn.disabled = false;
+              runRecommendedSetupBtn.textContent = original;
+            }
+          };
+        }
+        const openModelsBtn = document.getElementById("openModelsFromAuditBtn");
+        if (openModelsBtn) openModelsBtn.onclick = () => setSettingsTab("models");
+        const openProfilesBtn = document.getElementById("openProfilesFromAuditBtn");
+        if (openProfilesBtn) openProfilesBtn.onclick = () => setSettingsTab("analysis-profiles");
+        const openReportsBtn = document.getElementById("openReportsFromAuditBtn");
+        if (openReportsBtn) openReportsBtn.onclick = () => setSettingsTab("reports");
+        const resetLayoutBtn = document.getElementById("resetLayoutBtn");
+        if (resetLayoutBtn) {
+          resetLayoutBtn.onclick = () => {
+            resetLayoutSizes();
+            toast("Layout reset");
+          };
+        }
       }
 
       function renderSettingsConnections() {
@@ -3129,6 +4173,14 @@
             <td>${escapeHtml(item.updatedAt || "")}</td>
           </tr>
         `).join("") || '<tr><td colspan="3">No provider health records yet</td></tr>';
+        const modelKeyRows = (state.modelKeyStatus || []).map((row) => `
+          <tr>
+            <td>${escapeHtml(row.provider || "")}</td>
+            <td>${escapeHtml(row.status || "unknown")}</td>
+            <td>${escapeHtml(row.maskedKey || "not set")}</td>
+            <td>${escapeHtml(row.updatedAt || "")}</td>
+          </tr>
+        `).join("") || '<tr><td colspan="4">No BYO model keys configured</td></tr>';
 
         root.innerHTML = `
           <div class="hf-accordion">
@@ -3138,6 +4190,18 @@
                 <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
               </summary>
               <div class="hf-acc-body">
+                <div class="field">
+                  <label>Strategy presets</label>
+                  <div class="hf-radio-group">
+                    ${modelStrategyPresets.map((preset) => `
+                      <label class="hf-radio" data-model-strategy="${preset.key}">
+                        <span class="hf-radio-title">${escapeHtml(preset.label)}</span>
+                        <span class="hf-radio-meta">${escapeHtml(`${preset.llmMode.toUpperCase()} · default ${preset.provider}`)}</span>
+                      </label>
+                    `).join("")}
+                  </div>
+                  <div class="stamp">Apply a preset to fill mode, provider, and failover chain in one click.</div>
+                </div>
                 <div class="field"><label>Mode</label>
                   <div class="hf-radio-group">
                     <label class="hf-radio ${prefs.llmMode === "managed" ? "active" : ""}" data-llm-mode="managed">
@@ -3152,10 +4216,38 @@
                   <input id="setLlmMode" type="hidden" value="${escapeAttr(prefs.llmMode || "managed")}" />
                 </div>
                 <div class="row">
-                  <div class="field"><label>Default Provider</label><input id="setDefaultProvider" value="${escapeAttr(prefs.defaultProvider || "managed")}" /></div>
+                  <div class="field"><label>Default Provider</label>
+                    <select id="setDefaultProvider">
+                      ${providerOptions.map((option) => `<option value="${escapeAttr(option.value)}" ${(prefs.defaultProvider || "managed") === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+                    </select>
+                  </div>
                   <div class="field"><label>Failover Chain</label><input id="setFailoverChain" value="${escapeAttr((prefs.failoverChain || []).join(", "))}" /></div>
                 </div>
                 <div class="field"><label>BYO Key Refs (comma separated)</label><input id="setByoRefs" value="${escapeAttr((prefs.byoKeyRefs || []).join(", "))}" /></div>
+                <div class="line-actions">
+                  <button id="saveModelsNowBtn" class="line-btn" type="button">Save model settings now</button>
+                  <button id="openProfilesFromModelsBtn" class="line-btn" type="button">Open analysis profiles</button>
+                </div>
+              </div>
+            </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>Provider API keys</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                <div class="row">
+                  <div class="field"><label>OpenAI key</label><input id="setOpenAiKey" type="password" placeholder="sk-..." autocomplete="off" /></div>
+                  <div class="field"><label>Anthropic key</label><input id="setAnthropicKey" type="password" placeholder="sk-ant-..." autocomplete="off" /></div>
+                  <div class="field"><label>Gemini key</label><input id="setGeminiKey" type="password" placeholder="AIza..." autocomplete="off" /></div>
+                </div>
+                <div class="stamp">Keys are stored as tenant-scoped secret refs and never returned in raw form.</div>
+                <div class="hf-table-wrap" style="margin-top:8px;">
+                  <table class="hf-table">
+                    <thead><tr><th>Provider</th><th>Status</th><th>Masked key</th><th>Updated</th></tr></thead>
+                    <tbody>${modelKeyRows}</tbody>
+                  </table>
+                </div>
               </div>
             </details>
             <details class="hf-acc-item" open>
@@ -3189,6 +4281,34 @@
           };
         });
 
+        root.querySelectorAll("[data-model-strategy]").forEach((button) => {
+          button.onclick = () => {
+            const preset = modelStrategyPresets.find((item) => item.key === button.dataset.modelStrategy);
+            if (!preset) return;
+            const llmModeInput = document.getElementById("setLlmMode");
+            const providerInput = document.getElementById("setDefaultProvider");
+            const failoverInput = document.getElementById("setFailoverChain");
+            if (llmModeInput) llmModeInput.value = preset.llmMode;
+            if (providerInput) providerInput.value = preset.provider;
+            if (failoverInput) failoverInput.value = preset.failoverChain.join(", ");
+            root.querySelectorAll("[data-llm-mode]").forEach((item) => item.classList.toggle("active", item.dataset.llmMode === preset.llmMode));
+            toast(`Applied ${preset.label} strategy`);
+          };
+        });
+
+        const saveModelsNowBtn = document.getElementById("saveModelsNowBtn");
+        if (saveModelsNowBtn) {
+          saveModelsNowBtn.onclick = async () => {
+            state.settingsTab = "models";
+            await saveSettingsForActiveTab();
+          };
+        }
+
+        const openProfilesFromModelsBtn = document.getElementById("openProfilesFromModelsBtn");
+        if (openProfilesFromModelsBtn) {
+          openProfilesFromModelsBtn.onclick = () => setSettingsTab("analysis-profiles");
+        }
+
         const refresh = document.getElementById("refreshProviderHealthBtn");
         if (refresh) {
           refresh.onclick = async () => {
@@ -3210,7 +4330,10 @@
             <td>${escapeHtml(profile.provider)}</td>
             <td>${Number(profile.horizonDays)}d</td>
             <td>
-              <button class="line-btn" type="button" data-activate-profile="${profile.id}">Activate</button>
+              <div class="line-actions" style="margin-top:0;">
+                <button class="line-btn" type="button" data-activate-profile="${profile.id}">Activate</button>
+                <button class="line-btn" type="button" data-use-profile-provider="${profile.id}">Use for chat</button>
+              </div>
             </td>
           </tr>
         `).join("") || '<tr><td colspan="5">No analysis profiles</td></tr>';
@@ -3223,6 +4346,12 @@
                 <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
               </summary>
               <div class="hf-acc-body">
+                <div class="field" style="margin-bottom:8px;">
+                  <label>Starter profiles</label>
+                  <div class="line-actions">
+                    ${analysisPresetOptions.map((preset) => `<button class="line-btn" type="button" data-create-preset-profile="${preset.key}">${escapeHtml(preset.name)}</button>`).join("")}
+                  </div>
+                </div>
                 <div class="line-actions" style="margin-bottom:8px;">
                   <button id="createProfileBtn" class="line-btn" type="button">New profile</button>
                 </div>
@@ -3260,12 +4389,64 @@
           };
         }
 
+        root.querySelectorAll("[data-create-preset-profile]").forEach((button) => {
+          button.onclick = async () => {
+            const preset = analysisPresetOptions.find((item) => item.key === button.dataset.createPresetProfile);
+            if (!preset) return;
+            const existing = (state.profiles || []).find((profile) => profile.name.toLowerCase() === preset.name.toLowerCase());
+            if (existing) {
+              await api(`/v1/models/profiles/${encodeURIComponent(existing.id)}/activate`, { method: "POST", body: {} });
+              toast(`Activated ${existing.name}`);
+            } else {
+              const created = await api("/v1/models/profiles", {
+                method: "POST",
+                body: {
+                  name: preset.name,
+                  objective: preset.objective,
+                  targetMetricId: preset.targetMetricId,
+                  horizonDays: preset.horizonDays,
+                  provider: preset.provider,
+                  params: preset.params,
+                  active: false
+                }
+              });
+              await api(`/v1/models/profiles/${encodeURIComponent(created.profile.id)}/activate`, { method: "POST", body: {} });
+              toast(`Created and activated ${created.profile.name}`);
+            }
+            await loadSettings();
+            renderSettingsAnalysisProfiles();
+          };
+        });
+
         root.querySelectorAll("[data-activate-profile]").forEach((button) => {
           button.onclick = async () => {
             await api(`/v1/models/profiles/${encodeURIComponent(button.dataset.activateProfile)}/activate`, { method: "POST", body: {} });
             toast("Profile activated");
             await loadSettings();
             renderSettingsAnalysisProfiles();
+          };
+        });
+
+        root.querySelectorAll("[data-use-profile-provider]").forEach((button) => {
+          button.onclick = async () => {
+            const profile = (state.profiles || []).find((item) => item.id === button.dataset.useProfileProvider);
+            if (!profile) return;
+            const provider = String(profile.provider || "managed").toLowerCase();
+            const prefs = state.settings?.modelPreferences || {};
+            const failoverChain = Array.isArray(prefs.failoverChain) ? prefs.failoverChain : [];
+            await api("/v1/settings/model-preferences", {
+              method: "PATCH",
+              body: {
+                llmMode: provider === "managed" ? "managed" : (prefs.llmMode || "byo"),
+                defaultProvider: provider,
+                failoverChain,
+                byoKeyRefs: Array.isArray(prefs.byoKeyRefs) ? prefs.byoKeyRefs : []
+              }
+            });
+            state.selectedModelPreset = modelPresetFromProvider(provider);
+            await loadSettings();
+            renderSettingsAnalysisProfiles();
+            toast(`Chat model aligned to ${profile.name}`);
           };
         });
       }
@@ -3275,6 +4456,12 @@
         if (!root || !state.settings) return;
         const training = state.settings.training || {};
         const memory = training.memoryPolicy || {};
+        const soulContent = state.soulDoc?.content || "# soul.md\n\nDefine long-term behavior, tone, and constraints for Titus.";
+        const meContent = state.meDoc?.content || "# me.md\n\nDefine how Titus should work with you specifically.";
+        const selectedAutomation = state.automations.find((item) => item.id === state.selectedAutomationId) || null;
+        const heartbeatContent = selectedAutomation
+          ? (state.heartbeatByAutomationId[selectedAutomation.id]?.content || selectedAutomation.heartbeatContent || "")
+          : "";
         root.innerHTML = `
           <div class="hf-accordion">
             <details class="hf-acc-item" open>
@@ -3323,8 +4510,187 @@
                 <div class="field"><label>Retention days</label><input id="setMemoryRetentionDays" type="number" min="1" value="${Number(memory.retentionDays ?? 60)}" /></div>
               </div>
             </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>soul.md (workspace behavior)</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                <div class="field">
+                  <label>Soul content</label>
+                  <textarea id="soulContent" style="min-height:180px;">${escapeHtml(soulContent)}</textarea>
+                </div>
+                <div class="line-actions">
+                  <button id="saveSoulBtn" class="line-btn" type="button">Save soul.md</button>
+                  <button id="exportSoulBtn" class="line-btn" type="button">Export soul.md</button>
+                  <button id="resetSoulBtn" class="line-btn" type="button">Reset to OpenClaw-style</button>
+                </div>
+              </div>
+            </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>me.md (personal behavior)</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                <div class="field">
+                  <label>Me content (scoped to current user)</label>
+                  <textarea id="meContent" style="min-height:160px;">${escapeHtml(meContent)}</textarea>
+                </div>
+                <div class="line-actions">
+                  <button id="saveMeBtn" class="line-btn" type="button">Save me.md</button>
+                  <button id="exportMeBtn" class="line-btn" type="button">Export me.md</button>
+                </div>
+              </div>
+            </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>heartbeat.md (automation behavior)</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                ${selectedAutomation ? `
+                  <div class="stamp">Editing automation: ${escapeHtml(selectedAutomation.name)}</div>
+                  <div class="field">
+                    <label>Heartbeat content</label>
+                    <textarea id="trainingHeartbeatContent" style="min-height:160px;">${escapeHtml(heartbeatContent)}</textarea>
+                  </div>
+                  <div class="line-actions">
+                    <button id="saveTrainingHeartbeatBtn" class="line-btn" type="button">Save heartbeat.md</button>
+                    <button id="exportTrainingHeartbeatBtn" class="line-btn" type="button">Export heartbeat.md</button>
+                    <button id="openAutomationsHeartbeatBtn" class="line-btn" type="button">Open automations editor</button>
+                  </div>
+                ` : `
+                  <div class="list-row">No automation selected. Open Settings > Automations to create one.</div>
+                  <div class="line-actions"><button id="openAutomationsHeartbeatBtn" class="line-btn" type="button">Open automations editor</button></div>
+                `}
+                </div>
+              </div>
+            </details>
           </div>
         `;
+
+        const saveSoulBtn = document.getElementById("saveSoulBtn");
+        if (saveSoulBtn) {
+          saveSoulBtn.onclick = async () => {
+            const content = document.getElementById("soulContent")?.value || "";
+            const saved = await api("/v1/workspace/soul", {
+              method: "PATCH",
+              body: { content }
+            });
+            state.soulDoc = saved.soul;
+            toast("soul.md saved");
+          };
+        }
+
+        const exportSoulBtn = document.getElementById("exportSoulBtn");
+        if (exportSoulBtn) {
+          exportSoulBtn.onclick = async () => {
+            const content = document.getElementById("soulContent")?.value || "";
+            const exported = await api("/v1/workspace/soul/export", {
+              method: "POST",
+              body: { content }
+            });
+            state.soulDoc = exported.soul;
+            toast(`soul.md exported to ${exported.path || ".runtime/soul"}`);
+          };
+        }
+
+        const resetSoulBtn = document.getElementById("resetSoulBtn");
+        if (resetSoulBtn) {
+          resetSoulBtn.onclick = async () => {
+            const reset = await api("/v1/workspace/soul", {
+              method: "PATCH",
+              body: {
+                content: [
+                  "# soul.md",
+                  "",
+                  "## Identity",
+                  "- You are Titus, the collaborative operating copilot for this workspace.",
+                  "- Be concise, practical, and precise.",
+                  "",
+                  "## Core Principles",
+                  "- Truth over tone: never fabricate data or certainty.",
+                  "- Deterministic-first: use built-in metrics, checks, and skills before freeform reasoning.",
+                  "- Actionable outputs: each recommendation should map to a clear next step.",
+                  "",
+                  "## Collaboration Rules",
+                  "- Shared workspace by default.",
+                  "- Respect private user context and private AI exchanges.",
+                  "- Keep thread continuity and reference prior decisions.",
+                  "",
+                  "## Safety Constraints",
+                  "- Never leak cross-tenant data.",
+                  "- Respect policy and budget guardrails.",
+                  "- High-impact actions require approval.",
+                  "",
+                  "## Artifacts",
+                  "- heartbeat.md drives folder automation checks and triggers.",
+                  "- me.md provides per-user interaction preferences."
+                ].join("\n")
+              }
+            });
+            state.soulDoc = reset.soul;
+            renderSettingsTraining();
+            toast("soul.md reset");
+          };
+        }
+
+        const saveMeBtn = document.getElementById("saveMeBtn");
+        if (saveMeBtn) {
+          saveMeBtn.onclick = async () => {
+            const content = document.getElementById("meContent")?.value || "";
+            const saved = await api("/v1/workspace/me", {
+              method: "PATCH",
+              body: { content }
+            });
+            state.meDoc = saved.me;
+            toast("me.md saved");
+          };
+        }
+
+        const exportMeBtn = document.getElementById("exportMeBtn");
+        if (exportMeBtn) {
+          exportMeBtn.onclick = async () => {
+            const content = document.getElementById("meContent")?.value || "";
+            const exported = await api("/v1/workspace/me/export", {
+              method: "POST",
+              body: { content }
+            });
+            state.meDoc = exported.me;
+            toast(`me.md exported to ${exported.path || ".runtime/me"}`);
+          };
+        }
+
+        const saveTrainingHeartbeatBtn = document.getElementById("saveTrainingHeartbeatBtn");
+        if (saveTrainingHeartbeatBtn && selectedAutomation) {
+          saveTrainingHeartbeatBtn.onclick = async () => {
+            const content = document.getElementById("trainingHeartbeatContent")?.value || "";
+            const saved = await api(`/v1/automations/${encodeURIComponent(selectedAutomation.id)}/heartbeat`, {
+              method: "PATCH",
+              body: { content }
+            });
+            state.heartbeatByAutomationId[selectedAutomation.id] = saved.heartbeat;
+            toast(saved.heartbeat.valid ? "heartbeat.md saved" : "Saved with validation warnings");
+          };
+        }
+
+        const exportTrainingHeartbeatBtn = document.getElementById("exportTrainingHeartbeatBtn");
+        if (exportTrainingHeartbeatBtn && selectedAutomation) {
+          exportTrainingHeartbeatBtn.onclick = async () => {
+            const content = document.getElementById("trainingHeartbeatContent")?.value || "";
+            const exported = await api(`/v1/automations/${encodeURIComponent(selectedAutomation.id)}/heartbeat/export`, {
+              method: "POST",
+              body: { content }
+            });
+            toast(`heartbeat.md exported to ${exported.path || "heartbeat.md"}`);
+          };
+        }
+
+        const openAutomationsHeartbeatBtn = document.getElementById("openAutomationsHeartbeatBtn");
+        if (openAutomationsHeartbeatBtn) {
+          openAutomationsHeartbeatBtn.onclick = () => setSettingsTab("automations");
+        }
       }
 
       function renderSettingsReports() {
@@ -3439,6 +4805,25 @@
         const root = document.getElementById("settings-channels");
         if (!root || !state.settings) return;
         const channels = state.settings.channels || {};
+        const slackLinks = state.channelThreadLinks?.slack || [];
+        const discordLinks = state.channelThreadLinks?.discord || [];
+        const threadOptions = (state.threads || []).map((thread) =>
+          `<option value="${escapeAttr(thread.id)}">${escapeHtml(thread.title || thread.id)}</option>`
+        ).join("");
+        const renderLinkRows = (items = [], channel) => {
+          if (!items.length) return '<tr><td colspan="4">No mappings</td></tr>';
+          return items.map((link) => `
+            <tr>
+              <td>${escapeHtml(link.externalThreadKey || "")}</td>
+              <td>${escapeHtml((state.threads || []).find((item) => item.id === link.threadId)?.title || link.threadId || "")}</td>
+              <td>${escapeHtml(timeLabel(link.updatedAt))}</td>
+              <td>
+                <button class="line-btn" type="button" data-open-thread-link-thread="${link.threadId}">Open thread</button>
+                <button class="line-btn" type="button" data-delete-thread-link="${channel}:${link.id}">Delete</button>
+              </td>
+            </tr>
+          `).join("");
+        };
         root.innerHTML = `
           <div class="hf-accordion">
             <details class="hf-acc-item" open>
@@ -3448,6 +4833,21 @@
               </summary>
               <div class="hf-acc-body">
                 <div class="field"><label>Webhook Ref</label><input id="setSlackRef" value="${escapeAttr(channels.slack?.webhookRef || "")}" /></div>
+                <div class="row">
+                  <div class="field"><label>Bridge Thread ID</label><input id="setSlackBridgeThread" value="${escapeAttr(channels.slack?.bridge?.threadId || "")}" placeholder="workspace_thread_..." /></div>
+                  <div class="field"><label>Inbound Token (optional)</label><input id="setSlackInboundToken" value="${escapeAttr(channels.slack?.inbound?.token || "")}" placeholder="shared secret token" /></div>
+                </div>
+                <div class="hf-table-wrap" style="margin-top:8px;">
+                  <table class="hf-table">
+                    <thead><tr><th>External Thread Key</th><th>Workspace Thread</th><th>Updated</th><th>Action</th></tr></thead>
+                    <tbody>${renderLinkRows(slackLinks, "slack")}</tbody>
+                  </table>
+                </div>
+                <div class="row" style="margin-top:8px;">
+                  <div class="field"><label>External Thread Key</label><input id="newSlackExternalKey" placeholder="C123:1700000000.000001" /></div>
+                  <div class="field"><label>Workspace Thread</label><select id="newSlackThreadId">${threadOptions}</select></div>
+                </div>
+                <div class="line-actions"><button id="upsertSlackLinkBtn" class="line-btn" type="button">Save Slack Mapping</button></div>
               </div>
             </details>
             <details class="hf-acc-item" open>
@@ -3462,20 +4862,115 @@
                 </div>
               </div>
             </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>Discord</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                <div class="field"><label>Webhook Ref</label><input id="setDiscordRef" value="${escapeAttr(channels.discord?.webhookRef || "")}" /></div>
+                <div class="row">
+                  <div class="field"><label>Bridge Thread ID</label><input id="setDiscordBridgeThread" value="${escapeAttr(channels.discord?.bridge?.threadId || "")}" placeholder="workspace_thread_..." /></div>
+                  <div class="field"><label>Inbound Token (optional)</label><input id="setDiscordInboundToken" value="${escapeAttr(channels.discord?.inbound?.token || "")}" placeholder="shared secret token" /></div>
+                </div>
+                <div class="hf-table-wrap" style="margin-top:8px;">
+                  <table class="hf-table">
+                    <thead><tr><th>External Thread Key</th><th>Workspace Thread</th><th>Updated</th><th>Action</th></tr></thead>
+                    <tbody>${renderLinkRows(discordLinks, "discord")}</tbody>
+                  </table>
+                </div>
+                <div class="row" style="margin-top:8px;">
+                  <div class="field"><label>External Thread Key</label><input id="newDiscordExternalKey" placeholder="channel_or_thread_id" /></div>
+                  <div class="field"><label>Workspace Thread</label><select id="newDiscordThreadId">${threadOptions}</select></div>
+                </div>
+                <div class="line-actions"><button id="upsertDiscordLinkBtn" class="line-btn" type="button">Save Discord Mapping</button></div>
+              </div>
+            </details>
           </div>
         `;
+
+        const upsertLink = async (channel) => {
+          const externalInputId = channel === "slack" ? "newSlackExternalKey" : "newDiscordExternalKey";
+          const threadInputId = channel === "slack" ? "newSlackThreadId" : "newDiscordThreadId";
+          const externalThreadKey = document.getElementById(externalInputId)?.value?.trim() || "";
+          const threadId = document.getElementById(threadInputId)?.value?.trim() || "";
+          if (!externalThreadKey || !threadId) {
+            toast("External key and thread are required");
+            return;
+          }
+          await api(`/v1/channels/${encodeURIComponent(channel)}/thread-links`, {
+            method: "POST",
+            body: { externalThreadKey, threadId }
+          });
+          await loadSettings();
+          renderSettingsChannels();
+          toast(`${channel} mapping saved`);
+        };
+
+        const upsertSlackLinkBtn = document.getElementById("upsertSlackLinkBtn");
+        if (upsertSlackLinkBtn) {
+          upsertSlackLinkBtn.onclick = async () => {
+            await upsertLink("slack");
+          };
+        }
+
+        const upsertDiscordLinkBtn = document.getElementById("upsertDiscordLinkBtn");
+        if (upsertDiscordLinkBtn) {
+          upsertDiscordLinkBtn.onclick = async () => {
+            await upsertLink("discord");
+          };
+        }
+
+        root.querySelectorAll("[data-delete-thread-link]").forEach((button) => {
+          button.onclick = async () => {
+            const [channel, linkId] = String(button.dataset.deleteThreadLink || "").split(":");
+            if (!channel || !linkId) return;
+            await api(`/v1/channels/${encodeURIComponent(channel)}/thread-links/${encodeURIComponent(linkId)}`, {
+              method: "DELETE",
+              body: {}
+            });
+            await loadSettings();
+            renderSettingsChannels();
+            toast("Mapping removed");
+          };
+        });
+
+        root.querySelectorAll("[data-open-thread-link-thread]").forEach((button) => {
+          button.onclick = async () => {
+            const threadId = String(button.dataset.openThreadLinkThread || "").trim();
+            if (!threadId) return;
+            const thread = (state.threads || []).find((item) => item.id === threadId);
+            if (!thread) {
+              toast("Thread not found");
+              return;
+            }
+            state.activeThreadId = thread.id;
+            state.activeFolderId = thread.folderId;
+            state.replyToMessageId = null;
+            state.replyThreadPersistent = false;
+            closeSettings();
+            await loadAutomationsForActiveFolder();
+            await loadThreadData();
+            renderAll();
+            toast("Opened mapped thread");
+          };
+        });
       }
 
       function renderSettingsTeam() {
         const root = document.getElementById("settings-team");
         if (!root) return;
+        const canEditMembers = ["owner", "admin", "operator"].includes(state.currentUserRole);
         const members = (state.team || []).map((member) => `
           <tr>
             <td><span style="color:${memberColor(member.id)};">${escapeHtml(member.name)}</span></td>
             <td>${escapeHtml(member.role)}</td>
             <td>${escapeHtml(member.email || "")}</td>
+            <td>
+              ${canEditMembers ? `<button class="line-btn" type="button" data-edit-member-name="${member.id}" data-member-name="${escapeAttr(member.name || "")}">Edit name</button>` : '<span class="stamp">read only</span>'}
+            </td>
           </tr>
-        `).join("") || '<tr><td colspan="3">No members</td></tr>';
+        `).join("") || '<tr><td colspan="4">No members</td></tr>';
         root.innerHTML = `
           <div class="hf-accordion">
             <details class="hf-acc-item" open>
@@ -3509,7 +5004,7 @@
                 <div class="hf-table-wrap">
                   <table class="hf-table">
                     <thead>
-                      <tr><th>Name</th><th>Role</th><th>Email</th></tr>
+                      <tr><th>Name</th><th>Role</th><th>Email</th><th>Actions</th></tr>
                     </thead>
                     <tbody>${members}</tbody>
                   </table>
@@ -3535,11 +5030,21 @@
             renderSettingsTeam();
           };
         }
+
+        root.querySelectorAll("[data-edit-member-name]").forEach((button) => {
+          button.onclick = () => {
+            openQuickModal("rename-member", {
+              memberId: button.dataset.editMemberName,
+              currentName: button.dataset.memberName || ""
+            });
+          };
+        });
       }
 
       function renderSettingsSkills() {
         const root = document.getElementById("settings-skills");
         if (!root) return;
+        const drafted = state.latestCraftedSkill || null;
         const rows = (state.installedSkills || []).map((skill) => `
           <tr>
             <td>${escapeHtml(skill.id)}</td>
@@ -3565,7 +5070,24 @@
                 <div class="line-actions">
                   <button id="installMarketingSkillBtn" class="line-btn" type="button">Install marketing skill</button>
                   <button id="installFinanceSkillBtn" class="line-btn" type="button">Install finance skill</button>
+                  <button id="craftSkillBtn" class="line-btn" type="button">Craft Skill</button>
                 </div>
+              </div>
+            </details>
+            <details class="hf-acc-item" open>
+              <summary class="hf-acc-summary">
+                <span>Crafted skill draft</span>
+                <svg class="hf-acc-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+              </summary>
+              <div class="hf-acc-body">
+                ${drafted ? `
+                  <div class="stamp">Draft: ${escapeHtml(drafted.draftId || "n/a")} | Skill: ${escapeHtml(drafted.manifest?.id || "custom-skill")}</div>
+                  ${drafted.generation ? `<div class="stamp" style="margin-top:4px;">Build mode: ${escapeHtml(drafted.generation.mode || "fallback")} | Provider: ${escapeHtml(drafted.generation.provider || "n/a")}</div>` : ""}
+                  <div class="line-actions" style="margin-top:8px;">
+                    <button id="publishCraftedSkillBtn" class="line-btn" type="button">Publish and activate</button>
+                  </div>
+                  <pre style="margin-top:8px; white-space:pre-wrap; font-size:12px;">${escapeHtml(drafted.skillMd || "")}</pre>
+                ` : '<div class="list-row">Use "Craft Skill" to generate a private skill draft via guided prompts.</div>'}
               </div>
             </details>
             <details class="hf-acc-item" open>
@@ -3602,6 +5124,30 @@
           await loadSettings();
           renderSettingsSkills();
         };
+
+        const craft = document.getElementById("craftSkillBtn");
+        if (craft) {
+          craft.onclick = async () => {
+            await startSkillBuilderFlow();
+          };
+        }
+
+        const publishCrafted = document.getElementById("publishCraftedSkillBtn");
+        if (publishCrafted) {
+          publishCrafted.onclick = async () => {
+            if (!drafted?.draftId) {
+              toast("No draft to publish");
+              return;
+            }
+            await api(`/v1/skills/drafts/${encodeURIComponent(drafted.draftId)}/publish`, {
+              method: "POST",
+              body: { active: true }
+            });
+            toast("Crafted skill published and activated");
+            await loadSettings();
+            renderSettingsSkills();
+          };
+        }
 
         root.querySelectorAll("[data-skill-activate]").forEach((button) => {
           button.onclick = async () => {
@@ -3888,6 +5434,7 @@
         renderDockFiles();
         renderDockDocs();
         renderDockTables();
+        renderDockTools();
         renderRightAttachments();
         renderNotifications();
         renderSettings();
@@ -3895,10 +5442,13 @@
 
         document.getElementById("askAiToggle")?.classList.toggle("active", state.askAi);
         document.getElementById("privateToggle")?.classList.toggle("active", state.privateAi);
+        document.getElementById("planModeToggle")?.classList.toggle("active", state.planMode);
+        document.getElementById("approvalToggle")?.classList.toggle("active", state.requireGroupApproval);
 
         const unread = state.notifications.filter((item) => !item.read).length;
         const notifBtn = document.querySelector('[data-right-tab="notifications"]');
         if (notifBtn) notifBtn.title = unread ? `Notifications (${unread})` : "Notifications";
+        syncComposerHighlight();
       }
 
       async function ensureActiveThread() {
@@ -3929,18 +5479,150 @@
         return payload;
       }
 
+      async function startSkillBuilderFlow() {
+        state.skillBuilder = {
+          active: true,
+          stepIndex: 0,
+          answers: {},
+          draftId: null,
+          skillMd: ""
+        };
+        state.askAi = true;
+        state.privateAi = true;
+        setLeftOpen(false);
+        closeSettings();
+        await ensureActiveThread();
+        const question = currentSkillBuilderQuestion();
+        const input = document.getElementById("composerInput");
+        if (input) {
+          input.placeholder = question?.prompt || "Answer skill builder question";
+          input.focus();
+        }
+        if (question && state.activeThreadId) {
+          await api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/messages`, {
+            method: "POST",
+            body: {
+              body: `Skill builder (1/${skillBuilderQuestions.length}): ${question.prompt}`,
+              visibility: "private",
+              privateRecipientUserId: state.currentUserId,
+              authorType: "agent",
+              authorName: state.workspaceAgent?.name || "Titus",
+              invokeAiMode: "none"
+            }
+          });
+          await loadThreadData();
+        }
+        renderAll();
+        toast("Skill builder started");
+      }
+
+      async function handleSkillBuilderMessage(text) {
+        const question = currentSkillBuilderQuestion();
+        if (!question) {
+          state.skillBuilder.active = false;
+          return;
+        }
+        const cleaned = String(text || "").trim();
+        if (!cleaned) {
+          toast("Answer the current skill-builder question");
+          return;
+        }
+        state.skillBuilder.answers[question.id] = cleaned;
+        const nextIndex = state.skillBuilder.stepIndex + 1;
+        const done = nextIndex >= skillBuilderQuestions.length;
+        let aiResponseText = "";
+
+        if (!done) {
+          state.skillBuilder.stepIndex = nextIndex;
+          const nextQuestion = currentSkillBuilderQuestion();
+          aiResponseText = `Skill builder (${nextIndex + 1}/${skillBuilderQuestions.length}): ${nextQuestion.prompt}`;
+        } else {
+          const preferredProvider = providerFromModelPreset(state.selectedModelPreset);
+          const generated = await api("/v1/skills/drafts/generate", {
+            method: "POST",
+            body: {
+              answers: state.skillBuilder.answers,
+              provider: preferredProvider || undefined
+            }
+          });
+          const manifest = generated.draft?.manifest || buildSkillManifestFromAnswers(state.skillBuilder.answers);
+          const skillMd = generated.skillMd || buildSkillMarkdown(manifest);
+          const generation = generated.generation || {};
+          state.skillBuilder.active = false;
+          state.skillBuilder.draftId = generated.draft?.draftId || null;
+          state.skillBuilder.skillMd = skillMd;
+          state.latestCraftedSkill = {
+            draftId: generated.draft?.draftId || "",
+            manifest,
+            skillMd,
+            generation
+          };
+          const generationSummary = generation.mode === "llm"
+            ? `generated with ${generation.provider || "configured provider"}`
+            : "generated with safe fallback template";
+          aiResponseText = `Skill draft saved as ${manifest.id}@${manifest.version} (draft: ${generated.draft?.draftId || "n/a"}), ${generationSummary}. Open Settings > Skills to publish.`;
+        }
+
+        await api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/messages`, {
+          method: "POST",
+          body: {
+            body: `[Skill Builder] ${question.label}: ${cleaned}`,
+            visibility: "private",
+            privateRecipientUserId: state.currentUserId,
+            authorType: "user",
+            authorName: state.team.find((m) => m.id === state.currentUserId)?.name || "User",
+            invokeAiMode: "explicit",
+            aiVisibility: "private",
+            aiResponseText
+          }
+        });
+
+        const input = document.getElementById("composerInput");
+        if (input) {
+          input.placeholder = state.skillBuilder.active
+            ? (currentSkillBuilderQuestion()?.prompt || "Answer next question")
+            : "Message team. Mention @Titus or enable Ask AI.";
+        }
+        await loadSettings();
+        await loadThreadData();
+        renderAll();
+        if (!state.skillBuilder.active) {
+          openSettings("skills");
+          toast("Skill draft ready in Settings > Skills");
+        }
+      }
+
       async function sendMessage(text) {
         await ensureActiveThread();
-        const invokeAiMode = state.askAi ? "explicit" : "auto";
+        if (state.skillBuilder.active) {
+          await handleSkillBuilderMessage(text);
+          return;
+        }
+        const pollSpec = parseInlinePollInput(text);
+        if (String(text || "").trim().toLowerCase().startsWith("/poll ") && !pollSpec) {
+          toast("Poll format: /poll Question | Option 1 | Option 2");
+          return;
+        }
+        const invokeAiMode = pollSpec ? "none" : (state.askAi ? "explicit" : "auto");
         const payload = {
-          body: text,
+          body: pollSpec ? pollSpec.question : text,
           visibility: "shared",
           authorType: "user",
           authorName: state.team.find((m) => m.id === state.currentUserId)?.name || "User",
           attachmentIds: state.pendingAssets.map((asset) => asset.id),
           parentMessageId: state.replyToMessageId || null,
           invokeAiMode,
-          aiVisibility: state.privateAi ? "private" : "shared"
+          aiVisibility: state.privateAi ? "private" : "shared",
+          modelPreset: state.selectedModelPreset,
+          effort: state.selectedEffort,
+          planMode: Boolean(state.planMode),
+          requireGroupApproval: Boolean(state.requireGroupApproval && !pollSpec),
+          poll: pollSpec
+            ? {
+                question: pollSpec.question,
+                options: pollSpec.options
+              }
+            : null
         };
         const message = await api(`/v1/workspace/chat/threads/${encodeURIComponent(state.activeThreadId)}/messages`, {
           method: "POST",
@@ -3948,11 +5630,17 @@
         });
 
         state.pendingAssets = [];
-        state.replyToMessageId = null;
-        document.getElementById("composerInput").placeholder = "Message team. Mention @Titus or enable Ask AI.";
+        if (!state.replyThreadPersistent) {
+          state.replyToMessageId = null;
+        }
+        document.getElementById("composerInput").placeholder = state.replyToMessageId
+          ? "Thread mode: continue with @Titus here (Esc to exit)"
+          : "Message team. Mention @Titus or enable Ask AI.";
         if (message.aiMessage) {
           delete state.aiWorkingByThread[state.activeThreadId];
-        } else if (state.askAi || hasAgentMention(text)) {
+        } else if (message.aiApproval && message.aiApproval.status === "pending") {
+          toast("AI request pending team approval");
+        } else if (!pollSpec && (state.askAi || hasAgentMention(text))) {
           state.aiWorkingByThread[state.activeThreadId] = {
             messageId: message.message?.id || "",
             agentName: state.workspaceAgent?.name || "Titus",
@@ -3964,7 +5652,7 @@
         scheduleRefresh("settings", 120);
       }
 
-      function openQuickModal(mode) {
+      function openQuickModal(mode, options = {}) {
         const modal = document.getElementById("quickModal");
         const title = document.getElementById("quickModalTitle");
         const label = document.getElementById("quickModalLabel");
@@ -3972,17 +5660,30 @@
         const confirm = document.getElementById("quickModalConfirm");
         state.quickModal.open = true;
         state.quickModal.mode = mode;
-        state.quickModal.title = mode === "create-folder" ? "Create Folder" : "Create Thread";
-        state.quickModal.label = mode === "create-folder" ? "Folder name" : "Thread title";
-        state.quickModal.placeholder = mode === "create-folder" ? "New folder" : "New thread";
-        state.quickModal.confirmLabel = "Create";
-        state.quickModal.value = "";
+        state.quickModal.targetMemberId = mode === "rename-member" ? String(options.memberId || "") : null;
+        if (mode === "create-folder") {
+          state.quickModal.title = "Create Folder";
+          state.quickModal.label = "Folder name";
+          state.quickModal.placeholder = "New folder";
+          state.quickModal.confirmLabel = "Create";
+        } else if (mode === "rename-member") {
+          state.quickModal.title = "Edit Display Name";
+          state.quickModal.label = "Display name";
+          state.quickModal.placeholder = "Team member name";
+          state.quickModal.confirmLabel = "Save";
+        } else {
+          state.quickModal.title = "Create Thread";
+          state.quickModal.label = "Thread title";
+          state.quickModal.placeholder = "New thread";
+          state.quickModal.confirmLabel = "Create";
+        }
+        state.quickModal.value = mode === "rename-member" ? String(options.currentName || "") : "";
         state.quickModal.error = "";
         if (title) title.textContent = state.quickModal.title;
         if (label) label.textContent = state.quickModal.label;
         if (confirm) confirm.textContent = state.quickModal.confirmLabel;
         if (input) {
-          input.value = "";
+          input.value = state.quickModal.value;
           input.placeholder = state.quickModal.placeholder;
         }
         if (modal) {
@@ -3998,6 +5699,7 @@
         if (activeEl && typeof activeEl.blur === "function") activeEl.blur();
         state.quickModal.open = false;
         state.quickModal.mode = null;
+        state.quickModal.targetMemberId = null;
         if (modal) {
           modal.classList.remove("open");
           modal.setAttribute("aria-hidden", "true");
@@ -4013,6 +5715,22 @@
           return;
         }
         const value = rawValue.slice(0, 96);
+        if (state.quickModal.mode === "rename-member") {
+          const memberId = String(state.quickModal.targetMemberId || "");
+          if (!memberId) {
+            toast("Missing team member");
+            return;
+          }
+          await api(`/v1/settings/team/${encodeURIComponent(memberId)}`, {
+            method: "PATCH",
+            body: { name: value }
+          });
+          await loadSettings();
+          closeQuickModal();
+          renderAll();
+          toast("Name updated");
+          return;
+        }
         if (state.quickModal.mode === "create-folder") {
           await api("/v1/workspace/folders", { method: "POST", body: { name: value } });
           await loadThreads();
@@ -4156,6 +5874,17 @@
               failoverChain
             }
           });
+          const keys = [
+            { provider: "openai", apiKey: document.getElementById("setOpenAiKey")?.value || "" },
+            { provider: "anthropic", apiKey: document.getElementById("setAnthropicKey")?.value || "" },
+            { provider: "gemini", apiKey: document.getElementById("setGeminiKey")?.value || "" }
+          ].filter((item) => String(item.apiKey || "").trim());
+          if (keys.length) {
+            await api("/v1/settings/model-keys", {
+              method: "PATCH",
+              body: { keys }
+            });
+          }
         } else if (tab === "training") {
           await api("/v1/settings/training", {
             method: "PATCH",
@@ -4177,13 +5906,39 @@
           toast("Use Upload/Activate actions inside this section");
         } else if (tab === "channels") {
           const slackRef = document.getElementById("setSlackRef")?.value.trim() || "";
+          const slackBridgeThread = document.getElementById("setSlackBridgeThread")?.value.trim() || "";
+          const slackInboundToken = document.getElementById("setSlackInboundToken")?.value.trim() || "";
           const tgToken = document.getElementById("setTelegramToken")?.value.trim() || "";
           const tgChat = document.getElementById("setTelegramChat")?.value.trim() || "";
+          const discordRef = document.getElementById("setDiscordRef")?.value.trim() || "";
+          const discordBridgeThread = document.getElementById("setDiscordBridgeThread")?.value.trim() || "";
+          const discordInboundToken = document.getElementById("setDiscordInboundToken")?.value.trim() || "";
           await api("/v1/settings/channels", {
             method: "PATCH",
             body: {
-              slack: { enabled: Boolean(slackRef), webhookRef: slackRef },
-              telegram: { enabled: Boolean(tgToken && tgChat), botTokenRef: tgToken, chatId: tgChat }
+              slack: {
+                enabled: Boolean(slackRef),
+                webhookRef: slackRef,
+                bridge: {
+                  enabled: Boolean(slackBridgeThread),
+                  threadId: slackBridgeThread
+                },
+                inbound: {
+                  token: slackInboundToken
+                }
+              },
+              telegram: { enabled: Boolean(tgToken && tgChat), botTokenRef: tgToken, chatId: tgChat },
+              discord: {
+                enabled: Boolean(discordRef),
+                webhookRef: discordRef,
+                bridge: {
+                  enabled: Boolean(discordBridgeThread),
+                  threadId: discordBridgeThread
+                },
+                inbound: {
+                  token: discordInboundToken
+                }
+              }
             }
           });
         } else if (tab === "policies") {
@@ -4214,11 +5969,27 @@
         const next = Math.min(textarea.scrollHeight, max);
         textarea.style.height = `${next}px`;
         textarea.style.overflowY = textarea.scrollHeight > max ? "auto" : "hidden";
+        syncComposerHighlight();
       }
 
       function bindEvents() {
         document.getElementById("topLeftToggle").onclick = () => setLeftOpen(!document.getElementById("app").classList.contains("left-open"));
         document.getElementById("topRightToggle").onclick = () => setRightOpen(!document.getElementById("app").classList.contains("right-open"));
+        const leftResizeHandle = document.getElementById("leftResizeHandle");
+        const rightResizeHandle = document.getElementById("rightResizeHandle");
+        const dockResizeHandle = document.getElementById("dockResizeHandle");
+        if (leftResizeHandle) {
+          leftResizeHandle.onpointerdown = (event) => startResize("left", event);
+        }
+        if (rightResizeHandle) {
+          rightResizeHandle.onpointerdown = (event) => startResize("right", event);
+        }
+        if (dockResizeHandle) {
+          dockResizeHandle.onpointerdown = (event) => {
+            if (!state.dockOpen) return;
+            startResize("dock", event);
+          };
+        }
         const leftEdgeToggle = document.getElementById("leftEdgeToggle");
         const rightEdgeToggle = document.getElementById("rightEdgeToggle");
         leftEdgeToggle.onpointerdown = (event) => {
@@ -4239,9 +6010,18 @@
 
         document.getElementById("openSettingsBtn").onclick = () => openSettings("general");
         document.getElementById("openAutomationsBtn").onclick = () => openSettings("automations");
-        document.getElementById("openSkillsBtn").onclick = () => openSettings("skills");
+        document.getElementById("openSkillsBtn").onclick = async () => {
+          await startSkillBuilderFlow();
+        };
 
         document.getElementById("openDockDocsBtn").onclick = () => {
+          if (!state.docsFiles.length) {
+            loadDocsData().catch(() => {});
+          }
+          toggleDock("docs");
+          if (state.dockOpen) renderDockDocs();
+        };
+        document.getElementById("floatingDocsBtn").onclick = () => {
           if (!state.docsFiles.length) {
             loadDocsData().catch(() => {});
           }
@@ -4263,6 +6043,7 @@
             if (!state.dockOpen) return;
             if (button.dataset.dockTab === "docs") renderDockDocs();
             if (button.dataset.dockTab === "tables") renderDockTables();
+            if (button.dataset.dockTab === "tools") renderDockTools();
           };
         });
         document.getElementById("closeDockBtn").onclick = () => setDockOpen(false);
@@ -4314,10 +6095,38 @@
           document.getElementById("privateToggle").classList.toggle("active", state.privateAi);
         };
 
+        document.getElementById("planModeToggle").onclick = () => {
+          state.planMode = !state.planMode;
+          document.getElementById("planModeToggle").classList.toggle("active", state.planMode);
+        };
+
+        document.getElementById("approvalToggle").onclick = () => {
+          state.requireGroupApproval = !state.requireGroupApproval;
+          document.getElementById("approvalToggle").classList.toggle("active", state.requireGroupApproval);
+        };
+
+        document.getElementById("pollBtn").onclick = () => {
+          const input = document.getElementById("composerInput");
+          if (!input) return;
+          if (!String(input.value || "").trim()) {
+            input.value = "/poll Question | Option 1 | Option 2";
+          } else if (!String(input.value || "").trim().toLowerCase().startsWith("/poll ")) {
+            input.value = `/poll ${String(input.value || "").trim()} | Option 1 | Option 2`;
+          }
+          input.focus();
+          applyAutoGrow();
+        };
+
         document.getElementById("micBtn").onclick = () => toast("Mic is ready");
 
         const composerInput = document.getElementById("composerInput");
         composerInput.addEventListener("input", applyAutoGrow);
+        composerInput.addEventListener("scroll", syncComposerHighlight);
+        composerInput.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+          event.preventDefault();
+          document.getElementById("composerForm")?.requestSubmit();
+        });
 
         document.getElementById("composerForm").onsubmit = async (event) => {
           event.preventDefault();
@@ -4398,13 +6207,20 @@
           }
         });
 
+        window.addEventListener("pointermove", handleResizeMove);
+        window.addEventListener("pointerup", stopResize);
+        window.addEventListener("pointercancel", stopResize);
+        window.addEventListener("resize", () => applyLayoutSizes());
+
         window.addEventListener("keydown", (event) => {
           if (event.key === "Escape") {
+            stopResize();
             closeSettings();
             closeMenus();
             closeQuickModal();
             if (state.dockOpen) setDockOpen(false);
             state.replyToMessageId = null;
+            state.replyThreadPersistent = false;
             document.getElementById("composerInput").placeholder = "Message team. Mention @Titus or enable Ask AI.";
           }
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -4420,6 +6236,7 @@
 
       async function boot() {
         bindEvents();
+        loadLayoutSizes();
         await ensureTenant();
         await loadAll();
         await connectRealtime();
@@ -4434,6 +6251,7 @@
       });
 
       window.addEventListener("beforeunload", () => {
+        stopResize();
         disconnectRealtime();
       });
     </script>

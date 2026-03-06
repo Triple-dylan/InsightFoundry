@@ -56,6 +56,18 @@ function requireChatMessage(state, tenantId, messageId) {
   return message;
 }
 
+function resolveThreadRootMessage(state, tenantId, message) {
+  let cursor = message;
+  const visited = new Set();
+  while (cursor?.parentMessageId) {
+    if (visited.has(cursor.id)) break;
+    visited.add(cursor.id);
+    const parent = requireChatMessage(state, tenantId, cursor.parentMessageId);
+    cursor = parent;
+  }
+  return cursor;
+}
+
 function compareByCreatedAtAsc(a, b) {
   if (a.createdAt === b.createdAt) return a.id < b.id ? -1 : 1;
   return a.createdAt < b.createdAt ? -1 : 1;
@@ -86,6 +98,42 @@ function normalizeAttachments(input) {
         previewUrl: previewUrl.slice(0, 2000)
       };
     });
+}
+
+function normalizePollOption(option, index) {
+  if (option == null) return null;
+  const rawLabel = typeof option === "string" ? option : option.label;
+  const label = String(rawLabel ?? "").trim().slice(0, 120);
+  if (!label) return null;
+  const optionId = typeof option === "object" && option.id
+    ? String(option.id)
+    : `opt_${index + 1}`;
+  const voterIds = Array.isArray(option?.voterIds)
+    ? [...new Set(option.voterIds.map((item) => String(item).trim()).filter(Boolean))]
+    : [];
+  return {
+    id: optionId,
+    label,
+    voterIds
+  };
+}
+
+function normalizePollPayload(input) {
+  if (!input || typeof input !== "object") return null;
+  const question = String(input.question ?? "").trim().slice(0, 220);
+  const options = Array.isArray(input.options)
+    ? input.options.map(normalizePollOption).filter(Boolean).slice(0, 12)
+    : [];
+  if (!question || options.length < 2) return null;
+  return {
+    id: input.id ? String(input.id) : newId("poll"),
+    question,
+    options,
+    multiple: Boolean(input.multiple),
+    closed: Boolean(input.closed),
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  };
 }
 
 function projectMessageForViewer(message, viewerUserId) {
@@ -637,7 +685,8 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
 
   const body = String(payload.body ?? "").trim();
   const attachments = normalizeAttachments(payload.attachments);
-  if (!body && attachments.length === 0) {
+  const poll = normalizePollPayload(payload.poll);
+  if (!body && attachments.length === 0 && !poll) {
     const err = new Error("body or attachments is required");
     err.statusCode = 400;
     throw err;
@@ -673,6 +722,7 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
       : null,
     body,
     attachments,
+    poll,
     hasMiniThread: false,
     replyCount: 0,
     isPrivateMarker: Boolean(payload.isPrivateMarker),
@@ -701,6 +751,44 @@ export function createChatMessage(state, tenant, payload = {}, actor = {}) {
   });
 
   return message;
+}
+
+export function voteOnMessagePoll(state, tenantId, messageId, userId, optionIds = []) {
+  const message = requireChatMessage(state, tenantId, messageId);
+  if (!message.poll) {
+    const err = new Error("poll_not_found");
+    err.statusCode = 404;
+    throw err;
+  }
+  if (message.poll.closed) {
+    const err = new Error("poll_closed");
+    err.statusCode = 400;
+    throw err;
+  }
+  const selected = [...new Set((Array.isArray(optionIds) ? optionIds : [optionIds])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean))];
+  if (!message.poll.multiple && selected.length > 1) {
+    const err = new Error("poll_single_choice_only");
+    err.statusCode = 400;
+    throw err;
+  }
+  const allowed = new Set((message.poll.options || []).map((item) => item.id));
+  if (selected.some((id) => !allowed.has(id))) {
+    const err = new Error("poll_option_invalid");
+    err.statusCode = 400;
+    throw err;
+  }
+  for (const option of message.poll.options) {
+    option.voterIds = (option.voterIds || []).filter((id) => id !== userId);
+    if (selected.includes(option.id)) {
+      option.voterIds.push(userId);
+      option.voterIds = [...new Set(option.voterIds)];
+    }
+  }
+  message.poll.updatedAt = nowIso();
+  message.updatedAt = nowIso();
+  return message.poll;
 }
 
 export function listThreadMessages(state, tenantId, threadId, viewerUserId, viewerChannel = "web") {
@@ -756,15 +844,16 @@ export function getMiniThread(state, tenantId, threadId, parentMessageId, viewer
 
 export function createAiReplyForMessage(state, tenant, payload = {}, actor = {}) {
   const thread = requireWorkspaceThread(state, tenant.id, payload.threadId);
-  const parent = requireChatMessage(state, tenant.id, payload.messageId);
-  if (parent.threadId !== thread.id) {
-    const err = new Error(`Message '${parent.id}' is not in thread '${thread.id}'`);
+  const source = requireChatMessage(state, tenant.id, payload.messageId);
+  if (source.threadId !== thread.id) {
+    const err = new Error(`Message '${source.id}' is not in thread '${thread.id}'`);
     err.statusCode = 400;
     throw err;
   }
+  const parent = resolveThreadRootMessage(state, tenant.id, source);
   const profile = getWorkspaceAgentProfile(state, tenant.id);
   const visibility = normalizeVisibility(payload.visibility);
-  const responseBody = baseAgentResponse(parent, profile, payload.responseText);
+  const responseBody = baseAgentResponse(source, profile, payload.responseText);
   const aiMessage = createChatMessage(state, tenant, {
     threadId: thread.id,
     folderId: thread.folderId,

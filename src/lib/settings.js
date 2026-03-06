@@ -34,13 +34,19 @@ function defaultTraining(tenant) {
 }
 
 function defaultChannels() {
+  const slackLike = {
+    bridge: { enabled: false, threadId: "" },
+    inbound: { token: "" }
+  };
   return {
-    slack: { enabled: false, webhookRef: "", template: "Insight summary: {{summary}}" },
+    slack: { enabled: false, webhookRef: "", template: "Insight summary: {{summary}}", ...slackLike },
     telegram: { enabled: false, botTokenRef: "", chatId: "", template: "Insight summary: {{summary}}" },
+    discord: { enabled: false, webhookRef: "", template: "Insight summary: {{summary}}", ...slackLike },
     reliability: {
       email: { maxAttempts: 2, baseDelayMs: 15000 },
       slack: { maxAttempts: 3, baseDelayMs: 20000 },
-      telegram: { maxAttempts: 4, baseDelayMs: 30000 }
+      telegram: { maxAttempts: 4, baseDelayMs: 30000 },
+      discord: { maxAttempts: 3, baseDelayMs: 20000 }
     }
   };
 }
@@ -70,12 +76,36 @@ function defaultChecklist(state, tenant) {
 
 export function ensureTenantSettings(state, tenant) {
   const existing = state.settingsByTenant.get(tenant.id);
+  const defaults = defaultChannels();
   if (existing) {
+    existing.channels = existing.channels || defaults;
+    existing.channels.slack = {
+      ...defaults.slack,
+      ...(existing.channels.slack || {}),
+      bridge: { ...defaults.slack.bridge, ...(existing.channels.slack?.bridge || {}) },
+      inbound: { ...defaults.slack.inbound, ...(existing.channels.slack?.inbound || {}) }
+    };
+    existing.channels.telegram = { ...defaults.telegram, ...(existing.channels.telegram || {}) };
+    existing.channels.discord = {
+      ...defaults.discord,
+      ...(existing.channels.discord || {}),
+      bridge: { ...defaults.discord.bridge, ...(existing.channels.discord?.bridge || {}) },
+      inbound: { ...defaults.discord.inbound, ...(existing.channels.discord?.inbound || {}) }
+    };
+    existing.channels.reliability = {
+      ...defaults.reliability,
+      ...(existing.channels.reliability || {})
+    };
     existing.checklist = {
       ...existing.checklist,
       connectionsConfigured: state.sourceConnections.some((item) => item.tenantId === tenant.id),
       modelProfileConfigured: state.modelProfiles.some((item) => item.tenantId === tenant.id),
-      reportTypeConfigured: state.reportTypes.some((item) => item.tenantId === tenant.id)
+      reportTypeConfigured: state.reportTypes.some((item) => item.tenantId === tenant.id),
+      channelsConfigured: Boolean(
+        existing.channels.slack?.enabled
+        || existing.channels.telegram?.enabled
+        || existing.channels.discord?.enabled
+      )
     };
     return existing;
   }
@@ -172,7 +202,7 @@ export function patchSettingsChannels(state, tenant, payload) {
   const settings = ensureTenantSettings(state, tenant);
   patch(settings.channels, payload);
   settings.checklist.channelsConfigured = Boolean(
-    settings.channels.slack?.enabled || settings.channels.telegram?.enabled
+    settings.channels.slack?.enabled || settings.channels.telegram?.enabled || settings.channels.discord?.enabled
   );
   settings.updatedAt = new Date().toISOString();
   return settings.channels;

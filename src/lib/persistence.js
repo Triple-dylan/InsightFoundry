@@ -27,6 +27,8 @@ function serializeState(state) {
     workspaceComments: state.workspaceComments,
     workspaceAgentProfiles: state.workspaceAgentProfiles,
     chatMessages: state.chatMessages,
+    chatAiApprovals: state.chatAiApprovals,
+    channelThreadLinks: state.channelThreadLinks,
     messageReactions: state.messageReactions,
     realtimeEvents: state.realtimeEvents,
     workspaceAttachments: state.workspaceAttachments,
@@ -36,6 +38,9 @@ function serializeState(state) {
     workspaceDocSessions: state.workspaceDocSessions,
     workspaceTables: state.workspaceTables,
     workspaceTableRows: state.workspaceTableRows,
+    workspaceSoulDocs: state.workspaceSoulDocs,
+    workspaceMeDocs: state.workspaceMeDocs,
+    workspaceTools: state.workspaceTools,
     notifications: state.notifications,
     projectMemories: state.projectMemories,
     userMemories: state.userMemories,
@@ -90,6 +95,8 @@ function hydrateState(state, payload = {}) {
   state.workspaceComments = payload.workspaceComments ?? state.workspaceComments;
   state.workspaceAgentProfiles = payload.workspaceAgentProfiles ?? state.workspaceAgentProfiles;
   state.chatMessages = payload.chatMessages ?? state.chatMessages;
+  state.chatAiApprovals = payload.chatAiApprovals ?? state.chatAiApprovals;
+  state.channelThreadLinks = payload.channelThreadLinks ?? state.channelThreadLinks;
   state.messageReactions = payload.messageReactions ?? state.messageReactions;
   state.realtimeEvents = payload.realtimeEvents ?? state.realtimeEvents;
   state.workspaceAttachments = payload.workspaceAttachments ?? state.workspaceAttachments;
@@ -99,6 +106,9 @@ function hydrateState(state, payload = {}) {
   state.workspaceDocSessions = payload.workspaceDocSessions ?? state.workspaceDocSessions;
   state.workspaceTables = payload.workspaceTables ?? state.workspaceTables;
   state.workspaceTableRows = payload.workspaceTableRows ?? state.workspaceTableRows;
+  state.workspaceSoulDocs = payload.workspaceSoulDocs ?? state.workspaceSoulDocs;
+  state.workspaceMeDocs = payload.workspaceMeDocs ?? state.workspaceMeDocs;
+  state.workspaceTools = payload.workspaceTools ?? state.workspaceTools;
   state.notifications = payload.notifications ?? state.notifications;
   state.projectMemories = payload.projectMemories ?? state.projectMemories;
   state.userMemories = payload.userMemories ?? state.userMemories;

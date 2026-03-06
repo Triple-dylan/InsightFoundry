@@ -3,7 +3,7 @@ import path from "node:path";
 import http from "node:http";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { createState, createTenant, requireTenant } from "./lib/state.js";
+import { createState, createTenant, requireTenant, newId } from "./lib/state.js";
 import { runConnectorSync } from "./lib/connectors.js";
 import { queryMetric } from "./lib/metrics.js";
 import { runModelTask } from "./lib/models.js";
@@ -21,7 +21,7 @@ import { authContextFromHeaders, requireRole, requireTenantHeader } from "./lib/
 import { pushAudit, listAudit } from "./lib/audit.js";
 import { listBlueprints } from "./lib/blueprints.js";
 import { startScheduler } from "./lib/scheduler.js";
-import { notifyReportDelivery, previewReportDelivery, retryChannelEvent } from "./lib/channels.js";
+import { notifyReportDelivery, previewReportDelivery, retryChannelEvent, notifyChatBridge } from "./lib/channels.js";
 import {
   ensureCollaborationDefaults,
   listTeamMembers,
@@ -42,6 +42,7 @@ import {
   ensureWorkspaceCoreDefaults,
   listThreadMessages,
   createChatMessage,
+  voteOnMessagePoll,
   listMessageReplies,
   getMiniThread,
   createAiReplyForMessage,
@@ -146,6 +147,16 @@ import {
   validateSkillDraft,
   publishSkillDraft
 } from "./lib/skill-drafts.js";
+import {
+  normalizeProviderName,
+  parseProviderCredentialEntry,
+  maskApiKey,
+  buildSkillManifestFromAnswers,
+  buildSkillMarkdown,
+  generateSkillArtifactsWithLlm,
+  generateWebToolFromPrompt,
+  generateChatReplyWithLlm
+} from "./lib/skill-builder.js";
 import {
   createAnalysisRun,
   listAnalysisRuns,
@@ -430,6 +441,15 @@ function parseMentionTokens(body = "") {
     .map((match) => String(match[1] || "").toLowerCase());
 }
 
+function providerFromModelPreset(value = "") {
+  const preset = String(value || "").toLowerCase();
+  if (!preset || preset === "auto") return "managed";
+  if (preset.includes("gpt") || preset.includes("openai")) return "openai";
+  if (preset.includes("claude") || preset.includes("anthropic")) return "anthropic";
+  if (preset.includes("gemini") || preset.includes("google")) return "gemini";
+  return normalizeProviderName(preset);
+}
+
 function shouldInvokeAiForMessage(messageBody, invokeAiMode, agentProfile) {
   if (invokeAiMode === "explicit") return true;
   if (invokeAiMode === "none") return false;
@@ -443,6 +463,406 @@ function shouldInvokeAiForMessage(messageBody, invokeAiMode, agentProfile) {
       .filter(Boolean)
   );
   return tokens.some((token) => aliases.has(token.replaceAll(/\s+/g, "")));
+}
+
+function listActiveTeamMemberIds(state, tenantId) {
+  return state.teamMembers
+    .filter((member) => member.tenantId === tenantId)
+    .filter((member) => member.status !== "inactive")
+    .map((member) => member.id);
+}
+
+function createChatAiApprovalRecord(state, tenantId, payload = {}) {
+  const requiredUserIds = [...new Set((payload.requiredUserIds || []).map((item) => String(item).trim()).filter(Boolean))];
+  const approvedUserIds = [...new Set((payload.approvedUserIds || []).map((item) => String(item).trim()).filter(Boolean))];
+  const now = new Date().toISOString();
+  const record = {
+    id: newId("chat_ai_approval"),
+    tenantId,
+    threadId: String(payload.threadId || ""),
+    messageId: String(payload.messageId || ""),
+    requestedBy: String(payload.requestedBy || ""),
+    requiredUserIds,
+    approvedUserIds,
+    status: approvedUserIds.length >= Math.max(1, requiredUserIds.length) ? "approved" : "pending",
+    aiOptions: {
+      visibility: payload.aiOptions?.visibility || "shared",
+      provider: payload.aiOptions?.provider || "",
+      modelPreset: payload.aiOptions?.modelPreset || "",
+      effort: payload.aiOptions?.effort || "high",
+      planMode: Boolean(payload.aiOptions?.planMode),
+      apiKey: payload.aiOptions?.apiKey || "",
+      explicitResponseText: payload.aiOptions?.explicitResponseText || "",
+      messageBody: payload.aiOptions?.messageBody || ""
+    },
+    createdAt: now,
+    updatedAt: now,
+    executedAt: null,
+    aiMessageId: null
+  };
+  state.chatAiApprovals.push(record);
+  return record;
+}
+
+function requireChatAiApproval(state, tenantId, approvalId) {
+  const record = state.chatAiApprovals.find((item) => item.tenantId === tenantId && item.id === approvalId);
+  if (!record) {
+    const err = new Error(`chat_ai_approval '${approvalId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return record;
+}
+
+function listThreadChatAiApprovals(state, tenantId, threadId) {
+  return state.chatAiApprovals
+    .filter((item) => item.tenantId === tenantId && item.threadId === threadId)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+}
+
+function requireChatMessageById(state, tenantId, messageId) {
+  const message = state.chatMessages.find((item) => item.tenantId === tenantId && item.id === messageId);
+  if (!message) {
+    const err = new Error(`Chat message '${messageId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return message;
+}
+
+function normalizeExternalThreadKey(channel, value = "") {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  return `${String(channel || "").toLowerCase()}:${key}`;
+}
+
+function listChannelThreadLinks(state, tenantId, channel, options = {}) {
+  const scopedChannel = String(channel || "").toLowerCase();
+  return state.channelThreadLinks
+    .filter((item) => item.tenantId === tenantId && item.channel === scopedChannel)
+    .filter((item) => (options.threadId ? item.threadId === options.threadId : true))
+    .filter((item) => (options.externalThreadKey ? item.externalThreadKey === normalizeExternalThreadKey(scopedChannel, options.externalThreadKey) : true))
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+}
+
+function upsertChannelThreadLink(state, tenantId, channel, externalThreadKey, threadId, metadata = {}) {
+  const scopedChannel = String(channel || "").toLowerCase();
+  const normalizedExternalKey = normalizeExternalThreadKey(scopedChannel, externalThreadKey);
+  if (!scopedChannel || !normalizedExternalKey || !threadId) {
+    const err = new Error("channel, externalThreadKey, and threadId are required");
+    err.statusCode = 400;
+    throw err;
+  }
+  const now = new Date().toISOString();
+  const existing = state.channelThreadLinks.find(
+    (item) =>
+      item.tenantId === tenantId
+      && item.channel === scopedChannel
+      && item.externalThreadKey === normalizedExternalKey
+  );
+  if (existing) {
+    existing.threadId = String(threadId);
+    existing.metadata = {
+      ...(existing.metadata || {}),
+      ...(metadata && typeof metadata === "object" ? metadata : {})
+    };
+    existing.updatedAt = now;
+    return existing;
+  }
+  const link = {
+    id: newId("channel_thread_link"),
+    tenantId,
+    channel: scopedChannel,
+    externalThreadKey: normalizedExternalKey,
+    threadId: String(threadId),
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    createdAt: now,
+    updatedAt: now
+  };
+  state.channelThreadLinks.push(link);
+  return link;
+}
+
+function findChannelThreadLink(state, tenantId, channel, externalThreadKey) {
+  const scopedChannel = String(channel || "").toLowerCase();
+  const normalizedExternalKey = normalizeExternalThreadKey(scopedChannel, externalThreadKey);
+  if (!normalizedExternalKey) return null;
+  return state.channelThreadLinks.find(
+    (item) =>
+      item.tenantId === tenantId
+      && item.channel === scopedChannel
+      && item.externalThreadKey === normalizedExternalKey
+  ) || null;
+}
+
+function requireChannelThreadLink(state, tenantId, channel, linkId) {
+  const scopedChannel = String(channel || "").toLowerCase();
+  const link = state.channelThreadLinks.find(
+    (item) => item.tenantId === tenantId && item.channel === scopedChannel && item.id === String(linkId)
+  );
+  if (!link) {
+    const err = new Error(`channel thread link '${linkId}' not found`);
+    err.statusCode = 404;
+    throw err;
+  }
+  return link;
+}
+
+function extractInboundChannelPayload(channel, body = {}) {
+  if (channel === "slack") {
+    if (body.type === "url_verification" && body.challenge) {
+      return { challenge: String(body.challenge), ignore: true };
+    }
+    const event = body.event && typeof body.event === "object" ? body.event : {};
+    const channelId = String(event.channel || body.channel || "").trim();
+    const threadTs = String(event.thread_ts || body.thread_ts || "").trim();
+    return {
+      text: String(event.text || body.text || "").trim(),
+      externalUserId: String(event.user || body.user_id || "").trim(),
+      authorName: String(event.user_name || body.user_name || "Slack User").trim(),
+      externalThreadKey: threadTs && channelId ? `${channelId}:${threadTs}` : channelId
+    };
+  }
+  if (channel === "discord") {
+    const author = body.author && typeof body.author === "object" ? body.author : {};
+    const channelId = String(body.channel_id || body.channel || "").trim();
+    const threadId = String(body.thread_id || "").trim();
+    return {
+      text: String(body.content || body.text || "").trim(),
+      externalUserId: String(author.id || body.user_id || "").trim(),
+      authorName: String(author.username || body.username || "Discord User").trim(),
+      externalThreadKey: threadId || channelId
+    };
+  }
+  return {
+    text: String(body.text || "").trim(),
+    externalUserId: "",
+    authorName: "Channel User",
+    externalThreadKey: ""
+  };
+}
+
+function resolveInboundBridgeThreadId(state, tenantId, channel, channelConfig, requestedThreadId = "", externalThreadKey = "") {
+  const explicit = String(requestedThreadId || "").trim();
+  if (explicit) return explicit;
+  const linked = findChannelThreadLink(state, tenantId, channel, externalThreadKey);
+  if (linked?.threadId) return linked.threadId;
+  const bridge = channelConfig?.bridge && typeof channelConfig.bridge === "object" ? channelConfig.bridge : {};
+  const configured = String(bridge.threadId || "").trim();
+  return configured;
+}
+
+function verifyInboundChannelToken(channelConfig, providedToken = "") {
+  const inbound = channelConfig?.inbound && typeof channelConfig.inbound === "object" ? channelConfig.inbound : {};
+  const requiredToken = String(inbound.token || "").trim();
+  if (!requiredToken) return true;
+  return requiredToken === String(providedToken || "").trim();
+}
+
+async function executeChatAiApproval(state, tenant, ctx, approval, emitRealtime) {
+  if (approval.status !== "approved") return { approval, aiMessage: null, chatResponse: null };
+  if (approval.executedAt && approval.aiMessageId) {
+    const existing = state.chatMessages.find((item) => item.tenantId === tenant.id && item.id === approval.aiMessageId) || null;
+    return { approval, aiMessage: existing, chatResponse: null };
+  }
+  const sourceMessage = requireChatMessageById(state, tenant.id, approval.messageId);
+  const thread = requireWorkspaceThread(state, tenant.id, approval.threadId);
+  const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
+  emitRealtime({
+    tenantId: tenant.id,
+    threadId: approval.threadId,
+    type: "chat.ai_working",
+    payload: { messageId: sourceMessage.id, agentName: agentProfile.name }
+  });
+  const chatResponse = await buildChatResponse(state, tenant, ctx, {
+    messageBody: approval.aiOptions?.messageBody || sourceMessage.body || "",
+    explicitResponseText: approval.aiOptions?.explicitResponseText,
+    provider: approval.aiOptions?.provider,
+    modelPreset: approval.aiOptions?.modelPreset,
+    effort: approval.aiOptions?.effort,
+    apiKey: approval.aiOptions?.apiKey,
+    planMode: Boolean(approval.aiOptions?.planMode),
+    threadTitle: thread.title,
+    agentProfile
+  });
+  const aiMessage = createAiReplyForMessage(state, tenant, {
+    threadId: approval.threadId,
+    messageId: sourceMessage.id,
+    visibility: approval.aiOptions?.visibility || "shared",
+    responseText: chatResponse.text,
+    attachments: [],
+    authorName: agentProfile.name
+  }, ctx);
+  const bridgeChannels = ["slack", "discord"].filter((channel) => channel !== String(sourceMessage.channel || "").toLowerCase());
+  const bridgeEvents = aiMessage.visibility === "shared"
+    ? notifyChatBridge(state, tenant.id, aiMessage, { channels: bridgeChannels })
+    : [];
+  approval.executedAt = new Date().toISOString();
+  approval.aiMessageId = aiMessage.id;
+  approval.status = "completed";
+  approval.updatedAt = new Date().toISOString();
+  emitRealtime({
+    tenantId: tenant.id,
+    threadId: approval.threadId,
+    type: "chat.ai_reply_created",
+    payload: {
+      parentMessageId: aiMessage.parentMessageId || sourceMessage.id,
+      aiMessageId: aiMessage.id,
+      visibility: aiMessage.visibility
+    }
+  });
+  emitRealtime({
+    tenantId: tenant.id,
+    threadId: approval.threadId,
+    type: "chat.ai_approval_updated",
+    payload: {
+      approvalId: approval.id,
+      status: approval.status,
+      approvedCount: approval.approvedUserIds.length,
+      requiredCount: approval.requiredUserIds.length,
+      aiMessageId: aiMessage.id,
+      bridgeEventCount: bridgeEvents.length
+    }
+  });
+  return { approval, aiMessage, chatResponse, bridgeEvents };
+}
+
+function upsertModelApiKeyRef(state, tenantId, provider, apiKey) {
+  const normalizedProvider = normalizeProviderName(provider);
+  const value = String(apiKey ?? "").trim();
+  if (!normalizedProvider || normalizedProvider === "managed" || !value) return null;
+  const fingerprint = crypto.createHash("sha256").update(`${tenantId}:${normalizedProvider}:${value}`).digest("hex");
+  const ref = `llmkey_${normalizedProvider}_${fingerprint.slice(0, 16)}`;
+  const existing = state.secretRefs.get(ref);
+  const now = new Date().toISOString();
+  state.secretRefs.set(ref, {
+    tenantId,
+    kind: "llm_api_key",
+    provider: normalizedProvider,
+    hasCredentials: true,
+    fingerprint,
+    keyValue: value,
+    masked: maskApiKey(value),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    lastValidatedAt: existing?.lastValidatedAt ?? null
+  });
+  return `${normalizedProvider}:${ref}`;
+}
+
+function normalizeByoKeyRefs(state, tenantId, refs = []) {
+  const normalized = [];
+  const byProvider = new Map();
+  for (const entry of refs) {
+    const parsed = parseProviderCredentialEntry(entry);
+    if (!parsed?.provider || parsed.provider === "managed") continue;
+    const token = String(parsed.token ?? "").trim();
+    if (!token) {
+      byProvider.set(parsed.provider, parsed.provider);
+      continue;
+    }
+    if (token.startsWith("secret_") || token.startsWith("llmkey_")) {
+      byProvider.set(parsed.provider, `${parsed.provider}:${token}`);
+      continue;
+    }
+    const storedRef = upsertModelApiKeyRef(state, tenantId, parsed.provider, token);
+    if (storedRef) byProvider.set(parsed.provider, storedRef);
+  }
+  for (const value of byProvider.values()) normalized.push(value);
+  return normalized;
+}
+
+function listModelKeySummaries(state, tenantId, settings) {
+  const refs = Array.isArray(settings?.modelPreferences?.byoKeyRefs) ? settings.modelPreferences.byoKeyRefs : [];
+  const rows = refs
+    .map((entry) => parseProviderCredentialEntry(entry))
+    .filter(Boolean)
+    .map((parsed) => {
+      const provider = normalizeProviderName(parsed.provider);
+      const token = String(parsed.token ?? "").trim();
+      if (!token) {
+        return {
+          provider,
+          ref: "",
+          status: "missing",
+          maskedKey: "",
+          updatedAt: null
+        };
+      }
+      if (token.startsWith("secret_") || token.startsWith("llmkey_")) {
+        const secret = state.secretRefs.get(token);
+        const valid = Boolean(secret && secret.tenantId === tenantId && secret.kind === "llm_api_key" && secret.hasCredentials);
+        return {
+          provider,
+          ref: token,
+          status: valid ? "configured" : "missing",
+          maskedKey: valid ? (secret.masked || "") : "",
+          updatedAt: valid ? (secret.updatedAt || null) : null
+        };
+      }
+      return {
+        provider,
+        ref: "",
+        status: "configured",
+        maskedKey: maskApiKey(token),
+        updatedAt: null
+      };
+    });
+  const dedup = new Map();
+  for (const row of rows) dedup.set(row.provider, row);
+  return [...dedup.values()].sort((a, b) => (a.provider > b.provider ? 1 : -1));
+}
+
+function resolveSkillGenerationCredential(state, tenantId, settings, preferredProvider, explicitApiKey = "") {
+  const requested = normalizeProviderName(preferredProvider || settings?.modelPreferences?.defaultProvider || "managed");
+  if (String(explicitApiKey || "").trim()) {
+    return {
+      provider: requested === "managed" ? "openai" : requested,
+      apiKey: String(explicitApiKey).trim(),
+      source: "request"
+    };
+  }
+  const refs = Array.isArray(settings?.modelPreferences?.byoKeyRefs) ? settings.modelPreferences.byoKeyRefs : [];
+  const candidates = refs
+    .map((entry) => parseProviderCredentialEntry(entry))
+    .filter(Boolean)
+    .map((parsed) => {
+      const provider = normalizeProviderName(parsed.provider);
+      const token = String(parsed.token ?? "").trim();
+      if (!token) return { provider, apiKey: "", source: "provider_only" };
+      if (token.startsWith("secret_") || token.startsWith("llmkey_")) {
+        const secret = state.secretRefs.get(token);
+        if (secret && secret.tenantId === tenantId && secret.kind === "llm_api_key" && secret.hasCredentials) {
+          return { provider, apiKey: String(secret.keyValue ?? "").trim(), source: "secret_ref" };
+        }
+        return { provider, apiKey: "", source: "secret_ref_missing" };
+      }
+      return { provider, apiKey: token, source: "inline" };
+    })
+    .filter((item) => item.provider && item.provider !== "managed");
+
+  const byProvider = new Map();
+  for (const candidate of candidates) {
+    if (!byProvider.has(candidate.provider) || (!byProvider.get(candidate.provider).apiKey && candidate.apiKey)) {
+      byProvider.set(candidate.provider, candidate);
+    }
+  }
+
+  const requestedCandidate = requested !== "managed" ? byProvider.get(requested) : null;
+  if (requestedCandidate?.apiKey) return requestedCandidate;
+
+  const defaultProvider = normalizeProviderName(settings?.modelPreferences?.defaultProvider || "");
+  const defaultCandidate = defaultProvider && defaultProvider !== "managed" ? byProvider.get(defaultProvider) : null;
+  if (defaultCandidate?.apiKey) return defaultCandidate;
+
+  const firstWithKey = [...byProvider.values()].find((item) => item.apiKey);
+  if (firstWithKey) return firstWithKey;
+
+  return {
+    provider: requested === "managed" ? defaultProvider || "managed" : requested,
+    apiKey: "",
+    source: "none"
+  };
 }
 
 function buildOnboardingState(state, tenant) {
@@ -469,6 +889,255 @@ function buildOnboardingState(state, tenant) {
   };
 }
 
+function ensureSoulDoc(state, tenantId, updatedBy = "system") {
+  let soul = state.workspaceSoulDocs.find((item) => item.tenantId === tenantId);
+  if (soul) return soul;
+  soul = {
+    tenantId,
+    content: [
+      "# soul.md",
+      "",
+      "## Identity",
+      "- You are Titus, the collaborative operating copilot for this workspace.",
+      "- Be concise, practical, and precise.",
+      "",
+      "## Core Principles",
+      "- Truth over tone: never fabricate data or certainty.",
+      "- Deterministic-first: use built-in metrics, checks, and skills before freeform reasoning.",
+      "- Actionable outputs: each recommendation should map to a clear next step.",
+      "",
+      "## Collaboration Rules",
+      "- Shared workspace by default.",
+      "- Respect private user context and private AI exchanges.",
+      "- Keep thread continuity and reference prior decisions.",
+      "",
+      "## Safety Constraints",
+      "- Never leak cross-tenant data.",
+      "- Respect policy and budget guardrails.",
+      "- High-impact actions require approval.",
+      "",
+      "## Artifacts",
+      "- heartbeat.md drives folder automation checks and triggers.",
+      "- me.md provides per-user interaction preferences."
+    ].join("\n"),
+    updatedAt: new Date().toISOString(),
+    updatedBy,
+    exportPath: ""
+  };
+  state.workspaceSoulDocs.push(soul);
+  return soul;
+}
+
+function ensureMeDoc(state, tenantId, userId = "ui-user", updatedBy = "system") {
+  const scopedUser = String(userId || "ui-user");
+  let me = state.workspaceMeDocs.find((item) => item.tenantId === tenantId && item.userId === scopedUser);
+  if (me) return me;
+  me = {
+    tenantId,
+    userId: scopedUser,
+    content: [
+      "# me.md",
+      "",
+      "## Working Style",
+      "- Preferred response density: concise.",
+      "- Prefer numbered action plans for execution.",
+      "",
+      "## Decision Preferences",
+      "- Surface tradeoffs and risks before recommendation.",
+      "- Highlight assumptions explicitly.",
+      "",
+      "## Collaboration Preferences",
+      "- Ask clarifying questions only when blocked.",
+      "- Default to implementation-first behavior."
+    ].join("\n"),
+    updatedAt: new Date().toISOString(),
+    updatedBy,
+    exportPath: ""
+  };
+  state.workspaceMeDocs.push(me);
+  return me;
+}
+
+function safeToolName(value = "") {
+  const clean = String(value || "Quick Tool")
+    .trim()
+    .replace(/[^\w.\- ]/g, "")
+    .slice(0, 120);
+  return clean || "Quick Tool";
+}
+
+function resolveToolGenerationCredential(state, tenantId, settings, preferredProvider, explicitApiKey = "") {
+  return resolveSkillGenerationCredential(
+    state,
+    tenantId,
+    settings,
+    preferredProvider,
+    explicitApiKey
+  );
+}
+
+function buildFallbackWebTool(title, prompt) {
+  const safeTitle = safeToolName(title || "Quick Tool");
+  const safePrompt = String(prompt || "").slice(0, 2000).replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return [
+    "<!doctype html>",
+    "<html>",
+    "<head>",
+    "<meta charset=\"utf-8\"/>",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>",
+    `<title>${safeTitle}</title>`,
+    "<style>",
+    "body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f7fb;color:#111827}",
+    ".wrap{max-width:960px;margin:0 auto;padding:24px}",
+    ".card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;box-shadow:0 8px 28px rgba(15,23,42,.08)}",
+    "textarea{width:100%;min-height:180px;border:1px solid #d1d5db;border-radius:10px;padding:10px}",
+    "button{margin-top:10px;border:0;background:#0f172a;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}",
+    "</style>",
+    "</head>",
+    "<body>",
+    "<div class=\"wrap\">",
+    `<h1>${safeTitle}</h1>`,
+    "<div class=\"card\">",
+    "<p>Fallback tool scaffold generated because live model output was unavailable.</p>",
+    `<p><strong>Original prompt:</strong> ${safePrompt}</p>`,
+    "<textarea id=\"notes\" placeholder=\"Use this area to continue building...\"></textarea>",
+    "<button onclick=\"alert('Scaffold ready. Replace with generated logic when model key is configured.')\">Run</button>",
+    "</div>",
+    "</div>",
+    "</body>",
+    "</html>"
+  ].join("");
+}
+
+function buildPersonaResponse(state, tenantId, userId, messageBody, agentProfile, explicit = null, options = {}) {
+  if (explicit != null && String(explicit).trim()) return String(explicit);
+  const text = String(messageBody || "").trim();
+  const me = ensureMeDoc(state, tenantId, userId, userId);
+  const soul = ensureSoulDoc(state, tenantId, userId);
+  const concisePreferred = /concise|brief|short/i.test(me.content);
+  const numberedPreferred = /numbered|action plan|step/i.test(me.content);
+  const safetyFirst = /approval|guardrail|safety/i.test(soul.content);
+
+  let core = "";
+  if (/forecast|projection|horizon/i.test(text)) {
+    core = "Forecast path ready: I can run the horizon model, summarize confidence, and propose next actions.";
+  } else if (/anomaly|risk|variance/i.test(text)) {
+    core = "Anomaly path ready: I can run checks, score severity, and post evidence-backed actions.";
+  } else if (/deal|quote|discount|margin/i.test(text)) {
+    core = "Deal-desk path ready: I can run margin, discount, and approval checks with policy notes.";
+  } else {
+    core = "I can convert this into a structured run with evidence and delivery outputs.";
+  }
+
+  const suffix = [];
+  if (numberedPreferred) suffix.push("I will answer in numbered steps.");
+  if (safetyFirst) suffix.push("Approval and policy guardrails will be enforced.");
+  const response = concisePreferred
+    ? `${agentProfile.name}: ${core}`
+    : `${agentProfile.name}: ${core} ${suffix.join(" ").trim()}`.trim();
+  if (options.planMode) {
+    return [
+      `${agentProfile.name}: Plan mode`,
+      "1. Clarify objective and constraints from the message.",
+      "2. Select data scope and validation checks.",
+      "3. Run the best-fit model/profile path.",
+      "4. Summarize evidence with confidence and risks.",
+      "5. Propose approval-gated next actions."
+    ].join("\n");
+  }
+  return response;
+}
+
+async function buildChatResponse(state, tenant, ctx, options = {}) {
+  const agentProfile = options.agentProfile || getWorkspaceAgentProfile(state, tenant.id);
+  const explicit = options.explicitResponseText;
+  if (explicit != null && String(explicit).trim()) {
+    return {
+      text: String(explicit),
+      mode: "explicit",
+      provider: "local",
+      model: null,
+      source: "request"
+    };
+  }
+
+  const fallback = buildPersonaResponse(
+    state,
+    tenant.id,
+    ctx.userId,
+    options.messageBody,
+    agentProfile,
+    null,
+    { planMode: Boolean(options.planMode) }
+  );
+  const settings = ensureTenantSettings(state, tenant);
+  const requestedProvider = normalizeProviderName(
+    options.provider
+    || providerFromModelPreset(options.modelPreset)
+    || settings.modelPreferences?.defaultProvider
+    || "managed"
+  );
+  const resolved = resolveSkillGenerationCredential(
+    state,
+    tenant.id,
+    settings,
+    requestedProvider,
+    options.apiKey
+  );
+
+  if (!resolved.apiKey || normalizeProviderName(resolved.provider) === "managed") {
+    return {
+      text: fallback,
+      mode: "fallback",
+      provider: normalizeProviderName(resolved.provider || requestedProvider || "managed"),
+      model: null,
+      source: resolved.source
+    };
+  }
+
+  try {
+    const me = ensureMeDoc(state, tenant.id, ctx.userId, ctx.userId);
+    const soul = ensureSoulDoc(state, tenant.id, ctx.userId);
+    const generated = await generateChatReplyWithLlm({
+      provider: resolved.provider,
+      apiKey: resolved.apiKey,
+      agentName: agentProfile.name,
+      userMessage: options.messageBody,
+      meContent: me.content,
+      soulContent: soul.content,
+      effort: options.effort,
+      planMode: Boolean(options.planMode),
+      threadTitle: options.threadTitle || "",
+      timeoutMs: 16000
+    });
+    if (!String(generated.text || "").trim()) {
+      return {
+        text: fallback,
+        mode: "fallback",
+        provider: generated.provider || normalizeProviderName(resolved.provider),
+        model: generated.model || null,
+        source: resolved.source
+      };
+    }
+    return {
+      text: generated.text,
+      mode: "llm",
+      provider: generated.provider || normalizeProviderName(resolved.provider),
+      model: generated.model || null,
+      source: resolved.source
+    };
+  } catch (error) {
+    return {
+      text: fallback,
+      mode: "fallback",
+      provider: normalizeProviderName(resolved.provider || requestedProvider || "managed"),
+      model: null,
+      source: resolved.source,
+      warning: String(error?.message || "chat_llm_failed")
+    };
+  }
+}
+
 function respondJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload, null, 2));
@@ -488,7 +1157,7 @@ function applyCors(req, res) {
     return;
   }
   res.setHeader("access-control-allow-origin", ALLOW_ORIGIN);
-  res.setHeader("access-control-allow-methods", "GET,POST,PATCH,OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type,x-tenant-id,x-user-id,x-user-role,x-channel-id");
   res.setHeader("vary", "origin");
   if (req.method === "OPTIONS") {
@@ -688,6 +1357,252 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         return;
       }
 
+      const channelInboundMatch = pathMatcher(pathname, "/v1/channels/:channel/inbound");
+      if (method === "POST" && channelInboundMatch) {
+        const channel = String(channelInboundMatch.channel || "").toLowerCase();
+        if (!["slack", "discord"].includes(channel)) {
+          respondJson(res, 400, { error: `Unsupported inbound channel '${channel}'` });
+          return;
+        }
+        const body = await parseJsonBody(req);
+        const tenantId = String(req.headers["x-tenant-id"] || body.tenantId || "").trim();
+        if (!tenantId) {
+          respondJson(res, 400, { error: "tenantId is required (header x-tenant-id or body.tenantId)" });
+          return;
+        }
+        const tenant = requireTenant(state, tenantId);
+        ensureCollaborationDefaults(state, tenant);
+        ensureWorkspaceCoreDefaults(state, tenant);
+        const settings = ensureTenantSettings(state, tenant);
+        const channelConfig = settings.channels?.[channel] || {};
+        const providedToken = String(
+          req.headers["x-channel-token"]
+          || base.searchParams.get("token")
+          || body.token
+          || ""
+        ).trim();
+        if (!verifyInboundChannelToken(channelConfig, providedToken)) {
+          respondJson(res, 403, { error: "invalid_channel_token" });
+          return;
+        }
+        const inbound = extractInboundChannelPayload(channel, body);
+        if (inbound.ignore && inbound.challenge) {
+          respondJson(res, 200, { challenge: inbound.challenge });
+          return;
+        }
+        if (!inbound.text) {
+          respondJson(res, 202, { accepted: false, reason: "empty_message" });
+          return;
+        }
+        const resolvedThreadId = resolveInboundBridgeThreadId(
+          state,
+          tenant.id,
+          channel,
+          channelConfig,
+          base.searchParams.get("threadId") || body.threadId,
+          inbound.externalThreadKey
+        );
+        if (!resolvedThreadId) {
+          respondJson(res, 400, { error: "No bridge thread configured. Set settings.channels.<channel>.bridge.threadId or pass threadId." });
+          return;
+        }
+        const thread = requireWorkspaceThread(state, tenant.id, resolvedThreadId);
+        let linkedThread = null;
+        if (inbound.externalThreadKey) {
+          linkedThread = upsertChannelThreadLink(
+            state,
+            tenant.id,
+            channel,
+            inbound.externalThreadKey,
+            thread.id,
+            {
+              source: "inbound",
+              authorName: inbound.authorName || "",
+              externalUserId: inbound.externalUserId || ""
+            }
+          );
+        }
+        const authorName = `${channel[0].toUpperCase()}${channel.slice(1)} • ${inbound.authorName || "User"}`;
+        const authorId = `${channel}:${inbound.externalUserId || crypto.randomUUID()}`;
+        const actor = {
+          tenantId: tenant.id,
+          userId: authorId,
+          userRole: "analyst",
+          channel
+        };
+        const message = createChatMessage(state, tenant, {
+          threadId: thread.id,
+          folderId: thread.folderId,
+          visibility: "shared",
+          body: inbound.text,
+          channel,
+          authorType: "user",
+          authorId,
+          authorName
+        }, actor);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: message.threadId,
+          type: "chat.message_created",
+          payload: {
+            messageId: message.id,
+            authorId: message.authorId,
+            visibility: message.visibility
+          }
+        });
+
+        let aiMessage = null;
+        const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
+        const invokeAi = shouldInvokeAiForMessage(inbound.text, "auto", agentProfile);
+        if (invokeAi) {
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: message.threadId,
+            type: "chat.ai_working",
+            payload: { messageId: message.id, agentName: agentProfile.name }
+          });
+          const chatResponse = await buildChatResponse(state, tenant, actor, {
+            messageBody: inbound.text,
+            threadTitle: thread.title,
+            agentProfile
+          });
+          aiMessage = createAiReplyForMessage(state, tenant, {
+            threadId: message.threadId,
+            messageId: message.id,
+            visibility: "shared",
+            responseText: chatResponse.text,
+            attachments: [],
+            authorName: agentProfile.name
+          }, actor);
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: message.threadId,
+            type: "chat.ai_reply_created",
+            payload: {
+              parentMessageId: aiMessage.parentMessageId || message.id,
+              aiMessageId: aiMessage.id,
+              visibility: aiMessage.visibility
+            }
+          });
+        }
+        const bridgeTargets = ["slack", "discord"].filter((item) => item !== channel);
+        const channelEvents = notifyChatBridge(state, tenant.id, message, { channels: bridgeTargets });
+        if (aiMessage?.visibility === "shared") {
+          channelEvents.push(...notifyChatBridge(state, tenant.id, aiMessage, { channels: bridgeTargets }));
+        }
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: authorId,
+          action: "channel_inbound_message_received",
+          details: {
+            channel,
+            threadId: thread.id,
+            messageId: message.id,
+            aiTriggered: invokeAi,
+            channelEventCount: channelEvents.length,
+            externalThreadKey: inbound.externalThreadKey || null,
+            linkedThreadLinkId: linkedThread?.id || null
+          }
+        });
+        await persistState();
+        respondJson(res, 201, { message, aiMessage, channelEvents, threadLink: linkedThread });
+        return;
+      }
+
+      const channelThreadLinksMatch = pathMatcher(pathname, "/v1/channels/:channel/thread-links");
+      if (channelThreadLinksMatch && method === "GET") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const channel = String(channelThreadLinksMatch.channel || "").toLowerCase();
+        if (!["slack", "discord"].includes(channel)) {
+          respondJson(res, 400, { error: `Unsupported channel '${channel}'` });
+          return;
+        }
+        const threadId = String(base.searchParams.get("threadId") || "").trim();
+        const externalThreadKey = String(base.searchParams.get("externalThreadKey") || "").trim();
+        const links = listChannelThreadLinks(state, ctx.tenantId, channel, {
+          threadId: threadId || undefined,
+          externalThreadKey: externalThreadKey || undefined
+        });
+        respondJson(res, 200, { links });
+        return;
+      }
+
+      if (channelThreadLinksMatch && method === "POST") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const channel = String(channelThreadLinksMatch.channel || "").toLowerCase();
+        if (!["slack", "discord"].includes(channel)) {
+          respondJson(res, 400, { error: `Unsupported channel '${channel}'` });
+          return;
+        }
+        const body = await parseJsonBody(req);
+        const threadId = String(body.threadId || "").trim();
+        const externalThreadKey = String(body.externalThreadKey || "").trim();
+        if (!threadId || !externalThreadKey) {
+          respondJson(res, 400, { error: "threadId and externalThreadKey are required" });
+          return;
+        }
+        requireWorkspaceThread(state, ctx.tenantId, threadId);
+        const link = upsertChannelThreadLink(
+          state,
+          ctx.tenantId,
+          channel,
+          externalThreadKey,
+          threadId,
+          {
+            source: "manual",
+            updatedBy: ctx.userId
+          }
+        );
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "channel_thread_link_upserted",
+          details: {
+            linkId: link.id,
+            channel: link.channel,
+            threadId: link.threadId,
+            externalThreadKey: link.externalThreadKey
+          }
+        });
+        await persistState();
+        respondJson(res, 201, { link });
+        return;
+      }
+
+      const channelThreadLinkDeleteMatch = pathMatcher(pathname, "/v1/channels/:channel/thread-links/:linkId");
+      if (channelThreadLinkDeleteMatch && method === "DELETE") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const channel = String(channelThreadLinkDeleteMatch.channel || "").toLowerCase();
+        if (!["slack", "discord"].includes(channel)) {
+          respondJson(res, 400, { error: `Unsupported channel '${channel}'` });
+          return;
+        }
+        const link = requireChannelThreadLink(state, ctx.tenantId, channel, channelThreadLinkDeleteMatch.linkId);
+        state.channelThreadLinks = state.channelThreadLinks.filter((item) => item.id !== link.id);
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "channel_thread_link_deleted",
+          details: {
+            linkId: link.id,
+            channel: link.channel,
+            threadId: link.threadId,
+            externalThreadKey: link.externalThreadKey
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { removed: link });
+        return;
+      }
+
       if (method === "GET" && pathname === "/v1/realtime/token") {
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
@@ -793,10 +1708,67 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireRole(ctx, ["owner", "admin", "operator"]);
         const tenant = requireTenant(state, ctx.tenantId);
         const body = await parseJsonBody(req);
+        if (Array.isArray(body.byoKeyRefs)) {
+          body.byoKeyRefs = normalizeByoKeyRefs(state, tenant.id, body.byoKeyRefs);
+        }
         const settings = patchSettingsModelPreferences(state, tenant, body);
         pushAudit(state, { tenantId: tenant.id, actorId: ctx.userId, action: "settings_model_preferences_updated", details: {} });
         await persistState();
         respondJson(res, 200, { settings });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/settings/model-keys") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const settings = ensureTenantSettings(state, tenant);
+        const keys = listModelKeySummaries(state, tenant.id, settings);
+        respondJson(res, 200, { keys });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/settings/model-keys") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = ensureTenantSettings(state, tenant);
+        const incoming = Array.isArray(body.keys) ? body.keys : [];
+        const existing = Array.isArray(settings.modelPreferences?.byoKeyRefs) ? [...settings.modelPreferences.byoKeyRefs] : [];
+        const mapByProvider = new Map(existing
+          .map((item) => parseProviderCredentialEntry(item))
+          .filter(Boolean)
+          .map((entry) => [normalizeProviderName(entry.provider), entry.token ? `${normalizeProviderName(entry.provider)}:${entry.token}` : normalizeProviderName(entry.provider)]));
+        for (const row of incoming) {
+          const provider = normalizeProviderName(row?.provider || "");
+          const apiKey = String(row?.apiKey ?? "").trim();
+          if (!provider || provider === "managed" || !apiKey) continue;
+          const ref = upsertModelApiKeyRef(state, tenant.id, provider, apiKey);
+          if (ref) mapByProvider.set(provider, ref);
+        }
+        settings.modelPreferences.byoKeyRefs = [...mapByProvider.values()];
+        if (settings.modelPreferences.byoKeyRefs.length && settings.modelPreferences.defaultProvider === "managed") {
+          const firstConfigured = parseProviderCredentialEntry(settings.modelPreferences.byoKeyRefs[0]);
+          settings.modelPreferences.defaultProvider = normalizeProviderName(firstConfigured?.provider || "openai");
+        }
+        settings.updatedAt = new Date().toISOString();
+        tenant.modelConfig.byoProviders = settings.modelPreferences.byoKeyRefs
+          .map((item) => parseProviderCredentialEntry(item))
+          .filter(Boolean)
+          .map((item) => normalizeProviderName(item.provider))
+          .filter((value) => value && value !== "managed");
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "settings_model_keys_updated",
+          details: {
+            providers: tenant.modelConfig.byoProviders
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { keys: listModelKeySummaries(state, tenant.id, settings) });
         return;
       }
 
@@ -969,7 +1941,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const ctx = authContextFromHeaders(req.headers);
         requireTenantHeader(ctx);
         requireTenant(state, ctx.tenantId);
-        const auth = completeGoogleWorkspaceAuth(state, ctx.tenantId, ctx.userId, {
+        const auth = await completeGoogleWorkspaceAuth(state, ctx.tenantId, ctx.userId, {
           state: base.searchParams.get("state"),
           code: base.searchParams.get("code")
         });
@@ -1079,6 +2051,235 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         });
         await persistState();
         respondJson(res, 200, { profile });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/soul") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const soul = ensureSoulDoc(state, ctx.tenantId, ctx.userId);
+        respondJson(res, 200, { soul });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/workspace/soul") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const soul = ensureSoulDoc(state, ctx.tenantId, ctx.userId);
+        soul.content = String(body.content ?? soul.content);
+        soul.updatedAt = new Date().toISOString();
+        soul.updatedBy = ctx.userId;
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_soul_updated",
+          details: {}
+        });
+        await persistState();
+        respondJson(res, 200, { soul });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/soul/export") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const soul = ensureSoulDoc(state, ctx.tenantId, ctx.userId);
+        const content = String(body.content ?? soul.content);
+        const runtimeDir = path.join(process.cwd(), ".runtime", "soul", ctx.tenantId);
+        fs.mkdirSync(runtimeDir, { recursive: true });
+        const exportPath = path.join(runtimeDir, "soul.md");
+        fs.writeFileSync(exportPath, content, "utf8");
+        soul.content = content;
+        soul.exportPath = exportPath;
+        soul.updatedAt = new Date().toISOString();
+        soul.updatedBy = ctx.userId;
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_soul_exported",
+          details: { exportPath }
+        });
+        await persistState();
+        respondJson(res, 200, { soul, path: exportPath });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/me") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const me = ensureMeDoc(state, ctx.tenantId, ctx.userId, ctx.userId);
+        respondJson(res, 200, { me });
+        return;
+      }
+
+      if (method === "PATCH" && pathname === "/v1/workspace/me") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const me = ensureMeDoc(state, ctx.tenantId, ctx.userId, ctx.userId);
+        me.content = String(body.content ?? me.content);
+        me.updatedAt = new Date().toISOString();
+        me.updatedBy = ctx.userId;
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_me_updated",
+          details: {}
+        });
+        await persistState();
+        respondJson(res, 200, { me });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/me/export") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const me = ensureMeDoc(state, ctx.tenantId, ctx.userId, ctx.userId);
+        const content = String(body.content ?? me.content);
+        const runtimeDir = path.join(process.cwd(), ".runtime", "me", ctx.tenantId, ctx.userId);
+        fs.mkdirSync(runtimeDir, { recursive: true });
+        const exportPath = path.join(runtimeDir, "me.md");
+        fs.writeFileSync(exportPath, content, "utf8");
+        me.content = content;
+        me.exportPath = exportPath;
+        me.updatedAt = new Date().toISOString();
+        me.updatedBy = ctx.userId;
+        pushAudit(state, {
+          tenantId: ctx.tenantId,
+          actorId: ctx.userId,
+          action: "workspace_me_exported",
+          details: { exportPath }
+        });
+        await persistState();
+        respondJson(res, 200, { me, path: exportPath });
+        return;
+      }
+
+      if (method === "GET" && pathname === "/v1/workspace/tools") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const tools = state.workspaceTools
+          .filter((item) => item.tenantId === ctx.tenantId)
+          .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+          .map((item) => ({
+            id: item.id,
+            tenantId: item.tenantId,
+            threadId: item.threadId,
+            name: item.name,
+            prompt: item.prompt,
+            html: item.html,
+            provider: item.provider,
+            model: item.model,
+            mode: item.mode,
+            warning: item.warning || null,
+            createdBy: item.createdBy,
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt
+          }));
+        respondJson(res, 200, { tools });
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/workspace/tools/generate") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const settings = ensureTenantSettings(state, tenant);
+        const name = safeToolName(body.name || "Quick Tool");
+        const prompt = String(body.prompt || "").trim();
+        if (!prompt) {
+          respondJson(res, 400, { error: "prompt is required" });
+          return;
+        }
+        const resolved = resolveToolGenerationCredential(
+          state,
+          tenant.id,
+          settings,
+          body.provider,
+          body.apiKey
+        );
+
+        let mode = "fallback";
+        let provider = normalizeProviderName(resolved.provider || body.provider || settings.modelPreferences?.defaultProvider || "managed");
+        let model = null;
+        let warning = "";
+        let html = "";
+        if (resolved.apiKey && provider !== "managed") {
+          try {
+            const generated = await generateWebToolFromPrompt({
+              provider,
+              apiKey: resolved.apiKey,
+              prompt,
+              title: name
+            });
+            mode = "llm";
+            provider = generated.provider;
+            model = generated.model;
+            html = generated.html;
+          } catch (error) {
+            warning = String(error.message || "tool_generation_failed");
+          }
+        } else {
+          warning = "no_valid_api_key_configured_fallback_used";
+        }
+        if (!html) {
+          html = buildFallbackWebTool(name, prompt);
+        }
+
+        const tool = {
+          id: newId("workspace_tool"),
+          tenantId: tenant.id,
+          threadId: body.threadId ? String(body.threadId) : null,
+          name,
+          prompt,
+          html,
+          mode,
+          provider,
+          model,
+          warning,
+          createdBy: ctx.userId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        state.workspaceTools.push(tool);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: tool.threadId || undefined,
+          type: "workspace.tool_generated",
+          payload: {
+            toolId: tool.id,
+            mode: tool.mode,
+            provider: tool.provider
+          }
+        });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_tool_generated",
+          details: {
+            toolId: tool.id,
+            mode: tool.mode,
+            provider: tool.provider
+          }
+        });
+        await persistState();
+        respondJson(res, 201, { tool });
         return;
       }
 
@@ -1211,6 +2412,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const tenant = requireTenant(state, ctx.tenantId);
         ensureWorkspaceCoreDefaults(state, tenant);
         const body = await parseJsonBody(req);
+        const thread = requireWorkspaceThread(state, ctx.tenantId, workspaceChatMessagesMatch.threadId);
         const messageAttachments = mergeMessageAttachments(state, ctx.tenantId, body.attachments, body.attachmentIds);
         const message = createChatMessage(state, tenant, {
           threadId: workspaceChatMessagesMatch.threadId,
@@ -1220,6 +2422,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           privateRecipientUserId: body.privateRecipientUserId,
           body: body.body,
           attachments: messageAttachments,
+          poll: body.poll,
           channel: ctx.channel,
           authorType: body.authorType ?? "user",
           authorId: body.authorId ?? ctx.userId,
@@ -1235,6 +2438,10 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
             visibility: message.visibility
           }
         });
+        const bridgeChannels = ["slack", "discord"].filter((channel) => channel !== String(message.channel || "").toLowerCase());
+        const bridgeEvents = message.visibility === "shared"
+          ? notifyChatBridge(state, tenant.id, message, { channels: bridgeChannels })
+          : [];
         const memoryCapture = ingestRememberCommand(state, tenant, ctx.userId, {
           body: body.body,
           folderId: message.folderId,
@@ -1242,21 +2449,76 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           tags: body.tags
         });
         let aiMessage = null;
+        let chatMeta = null;
         const invokeAiMode = String(body.invokeAiMode ?? "none");
+        const planMode = Boolean(body.planMode);
         const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
         const invokeAi = shouldInvokeAiForMessage(body.body, invokeAiMode, agentProfile);
-        if (invokeAi && message.visibility === "shared") {
+        const requireGroupApproval = Boolean(body.requireGroupApproval);
+        let aiApproval = null;
+        if (invokeAi && message.visibility === "shared" && requireGroupApproval) {
+          let requiredUserIds = listActiveTeamMemberIds(state, tenant.id);
+          if (!requiredUserIds.length) requiredUserIds = [ctx.userId];
+          if (!requiredUserIds.includes(ctx.userId)) requiredUserIds.push(ctx.userId);
+          aiApproval = createChatAiApprovalRecord(state, tenant.id, {
+            threadId: message.threadId,
+            messageId: message.id,
+            requestedBy: ctx.userId,
+            requiredUserIds,
+            approvedUserIds: [ctx.userId],
+            aiOptions: {
+              visibility: body.aiVisibility ?? "shared",
+              provider: body.provider || "",
+              modelPreset: body.modelPreset || "",
+              effort: body.effort || "high",
+              planMode,
+              apiKey: body.apiKey || "",
+              explicitResponseText: body.aiResponseText || "",
+              messageBody: body.body || ""
+            }
+          });
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: message.threadId,
+            type: "chat.ai_approval_requested",
+            payload: {
+              approvalId: aiApproval.id,
+              messageId: message.id,
+              requestedBy: ctx.userId,
+              approvedCount: aiApproval.approvedUserIds.length,
+              requiredCount: aiApproval.requiredUserIds.length
+            }
+          });
+          if (aiApproval.status === "approved") {
+            const executed = await executeChatAiApproval(state, tenant, ctx, aiApproval, emitRealtime);
+            aiMessage = executed.aiMessage;
+            chatMeta = executed.chatResponse;
+          }
+        }
+        if (!aiApproval && invokeAi && message.visibility === "shared") {
           emitRealtime({
             tenantId: tenant.id,
             threadId: message.threadId,
             type: "chat.ai_working",
             payload: { messageId: message.id, agentName: agentProfile.name }
           });
+          const chatResponse = await buildChatResponse(state, tenant, ctx, {
+            messageBody: body.body,
+            explicitResponseText: body.aiResponseText,
+            provider: body.provider,
+            modelPreset: body.modelPreset,
+            effort: body.effort,
+            apiKey: body.apiKey,
+            planMode,
+            threadTitle: thread.title,
+            agentProfile
+          });
+          chatMeta = chatResponse;
           aiMessage = createAiReplyForMessage(state, tenant, {
             threadId: message.threadId,
             messageId: message.id,
             visibility: body.aiVisibility ?? "shared",
-            responseText: body.aiResponseText,
+            responseText: chatResponse.text,
             attachments: [],
             authorName: agentProfile.name
           }, ctx);
@@ -1264,8 +2526,15 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
             tenantId: tenant.id,
             threadId: message.threadId,
             type: "chat.ai_reply_created",
-            payload: { parentMessageId: message.id, aiMessageId: aiMessage.id, visibility: aiMessage.visibility }
+            payload: {
+              parentMessageId: aiMessage.parentMessageId || message.id,
+              aiMessageId: aiMessage.id,
+              visibility: aiMessage.visibility
+            }
           });
+          if (aiMessage.visibility === "shared") {
+            bridgeEvents.push(...notifyChatBridge(state, tenant.id, aiMessage, { channels: bridgeChannels }));
+          }
         }
         pushAudit(state, {
           tenantId: tenant.id,
@@ -1276,11 +2545,17 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
             messageId: message.id,
             visibility: message.visibility,
             memoryCaptured: Boolean(memoryCapture),
-            invokeAi
+            invokeAi,
+            aiApprovalRequired: Boolean(aiApproval),
+            aiApprovalStatus: aiApproval?.status || null,
+            bridgeEventCount: bridgeEvents.length,
+            chatMode: aiMessage ? (chatMeta?.mode || "llm") : "none",
+            chatProvider: chatMeta?.provider || null,
+            chatModel: chatMeta?.model || null
           }
         });
         await persistState();
-        respondJson(res, 201, { message, memoryCapture, aiMessage });
+        respondJson(res, 201, { message, memoryCapture, aiMessage, aiApproval, channelEvents: bridgeEvents });
         return;
       }
 
@@ -1294,20 +2569,92 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const body = await parseJsonBody(req);
         const aiAttachments = mergeMessageAttachments(state, ctx.tenantId, body.attachments, body.attachmentIds);
         const agentProfile = getWorkspaceAgentProfile(state, tenant.id);
+        const thread = requireWorkspaceThread(state, tenant.id, workspaceChatAiMatch.threadId);
+        const sourceMessage = state.chatMessages.find(
+          (item) => item.tenantId === tenant.id && item.id === workspaceChatAiMatch.messageId
+        );
+        if (Boolean(body.requireGroupApproval)) {
+          let requiredUserIds = listActiveTeamMemberIds(state, tenant.id);
+          if (!requiredUserIds.length) requiredUserIds = [ctx.userId];
+          if (!requiredUserIds.includes(ctx.userId)) requiredUserIds.push(ctx.userId);
+          const aiApproval = createChatAiApprovalRecord(state, tenant.id, {
+            threadId: workspaceChatAiMatch.threadId,
+            messageId: workspaceChatAiMatch.messageId,
+            requestedBy: ctx.userId,
+            requiredUserIds,
+            approvedUserIds: [ctx.userId],
+            aiOptions: {
+              visibility: body.visibility || "shared",
+              provider: body.provider || "",
+              modelPreset: body.modelPreset || "",
+              effort: body.effort || "high",
+              planMode: Boolean(body.planMode),
+              apiKey: body.apiKey || "",
+              explicitResponseText: body.responseText || "",
+              messageBody: String(body.sourceMessage || sourceMessage?.body || "")
+            }
+          });
+          emitRealtime({
+            tenantId: tenant.id,
+            threadId: workspaceChatAiMatch.threadId,
+            type: "chat.ai_approval_requested",
+            payload: {
+              approvalId: aiApproval.id,
+              messageId: workspaceChatAiMatch.messageId,
+              requestedBy: ctx.userId,
+              approvedCount: aiApproval.approvedUserIds.length,
+              requiredCount: aiApproval.requiredUserIds.length
+            }
+          });
+          let aiMessage = null;
+          if (aiApproval.status === "approved") {
+            const executed = await executeChatAiApproval(state, tenant, ctx, aiApproval, emitRealtime);
+            aiMessage = executed.aiMessage;
+          }
+          pushAudit(state, {
+            tenantId: tenant.id,
+            actorId: ctx.userId,
+            action: "workspace_ai_approval_requested",
+            details: {
+              approvalId: aiApproval.id,
+              threadId: workspaceChatAiMatch.threadId,
+              messageId: workspaceChatAiMatch.messageId,
+              requiredCount: aiApproval.requiredUserIds.length
+            }
+          });
+          await persistState();
+          respondJson(res, 201, { approval: aiApproval, message: aiMessage });
+          return;
+        }
+        const chatResponse = await buildChatResponse(state, tenant, ctx, {
+          messageBody: String(body.sourceMessage || sourceMessage?.body || ""),
+          explicitResponseText: body.responseText,
+          provider: body.provider,
+          modelPreset: body.modelPreset,
+          effort: body.effort,
+          apiKey: body.apiKey,
+          planMode: Boolean(body.planMode),
+          threadTitle: thread.title,
+          agentProfile
+        });
         const message = createAiReplyForMessage(state, tenant, {
           threadId: workspaceChatAiMatch.threadId,
           messageId: workspaceChatAiMatch.messageId,
           visibility: body.visibility,
-          responseText: body.responseText,
+          responseText: chatResponse.text,
           attachments: aiAttachments,
           authorName: agentProfile.name
         }, ctx);
+        const bridgeChannels = ["slack", "discord"].filter((channel) => channel !== String(sourceMessage?.channel || "").toLowerCase());
+        const bridgeEvents = message.visibility === "shared"
+          ? notifyChatBridge(state, tenant.id, message, { channels: bridgeChannels })
+          : [];
         emitRealtime({
           tenantId: tenant.id,
           threadId: workspaceChatAiMatch.threadId,
           type: "chat.ai_reply_created",
           payload: {
-            parentMessageId: workspaceChatAiMatch.messageId,
+            parentMessageId: message.parentMessageId || workspaceChatAiMatch.messageId,
             aiMessageId: message.id,
             visibility: message.visibility
           }
@@ -1320,11 +2667,15 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
             threadId: workspaceChatAiMatch.threadId,
             messageId: workspaceChatAiMatch.messageId,
             aiMessageId: message.id,
-            visibility: message.visibility
+            visibility: message.visibility,
+            chatMode: chatResponse.mode,
+            chatProvider: chatResponse.provider,
+            chatModel: chatResponse.model,
+            bridgeEventCount: bridgeEvents.length
           }
         });
         await persistState();
-        respondJson(res, 201, { message });
+        respondJson(res, 201, { message, channelEvents: bridgeEvents });
         return;
       }
 
@@ -1366,6 +2717,10 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           authorId: body.authorId ?? ctx.userId,
           authorName: body.authorName ?? ctx.userId
         }, ctx);
+        const bridgeChannels = ["slack", "discord"].filter((channel) => channel !== String(reply.channel || "").toLowerCase());
+        const bridgeEvents = reply.visibility === "shared"
+          ? notifyChatBridge(state, tenant.id, reply, { channels: bridgeChannels })
+          : [];
         emitRealtime({
           tenantId: tenant.id,
           threadId: reply.threadId,
@@ -1381,10 +2736,15 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           tenantId: tenant.id,
           actorId: ctx.userId,
           action: "workspace_message_reply_created",
-          details: { threadId: workspaceChatRepliesMatch.threadId, parentMessageId: workspaceChatRepliesMatch.messageId, messageId: reply.id }
+          details: {
+            threadId: workspaceChatRepliesMatch.threadId,
+            parentMessageId: workspaceChatRepliesMatch.messageId,
+            messageId: reply.id,
+            bridgeEventCount: bridgeEvents.length
+          }
         });
         await persistState();
-        respondJson(res, 201, { reply });
+        respondJson(res, 201, { reply, channelEvents: bridgeEvents });
         return;
       }
 
@@ -1403,6 +2763,108 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           ctx.channel
         );
         respondJson(res, 200, { miniThread });
+        return;
+      }
+
+      const workspaceAiApprovalsMatch = pathMatcher(pathname, "/v1/workspace/chat/threads/:threadId/ai-approvals");
+      if (method === "GET" && workspaceAiApprovalsMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireTenant(state, ctx.tenantId);
+        const thread = requireWorkspaceThread(state, ctx.tenantId, workspaceAiApprovalsMatch.threadId);
+        const approvals = listThreadChatAiApprovals(state, ctx.tenantId, thread.id);
+        respondJson(res, 200, { approvals });
+        return;
+      }
+
+      const workspaceAiApprovalApproveMatch = pathMatcher(pathname, "/v1/workspace/chat/approvals/:approvalId/approve");
+      if (method === "POST" && workspaceAiApprovalApproveMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const approval = requireChatAiApproval(state, tenant.id, workspaceAiApprovalApproveMatch.approvalId);
+        if (approval.status === "completed") {
+          respondJson(res, 200, { approval, aiMessageId: approval.aiMessageId || null });
+          return;
+        }
+        if (!approval.requiredUserIds.includes(ctx.userId)) {
+          const err = new Error("user_not_required_for_approval");
+          err.statusCode = 403;
+          throw err;
+        }
+        if (!approval.approvedUserIds.includes(ctx.userId)) {
+          approval.approvedUserIds.push(ctx.userId);
+        }
+        const requiredCount = Math.max(1, approval.requiredUserIds.length);
+        approval.status = approval.approvedUserIds.length >= requiredCount ? "approved" : "pending";
+        approval.updatedAt = new Date().toISOString();
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: approval.threadId,
+          type: "chat.ai_approval_updated",
+          payload: {
+            approvalId: approval.id,
+            status: approval.status,
+            approvedCount: approval.approvedUserIds.length,
+            requiredCount: approval.requiredUserIds.length
+          }
+        });
+        let aiMessage = null;
+        let chatMeta = null;
+        if (approval.status === "approved") {
+          const executed = await executeChatAiApproval(state, tenant, ctx, approval, emitRealtime);
+          aiMessage = executed.aiMessage;
+          chatMeta = executed.chatResponse;
+        }
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_ai_approval_approved",
+          details: {
+            approvalId: approval.id,
+            threadId: approval.threadId,
+            approvedCount: approval.approvedUserIds.length,
+            requiredCount: approval.requiredUserIds.length,
+            chatMode: chatMeta?.mode || null
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { approval, aiMessage });
+        return;
+      }
+
+      const messagePollVoteMatch = pathMatcher(pathname, "/v1/workspace/chat/messages/:messageId/poll-vote");
+      if (method === "POST" && messagePollVoteMatch) {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst", "viewer"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const optionIds = Array.isArray(body.optionIds) ? body.optionIds : [body.optionId].filter(Boolean);
+        const poll = voteOnMessagePoll(state, tenant.id, messagePollVoteMatch.messageId, ctx.userId, optionIds);
+        const message = state.chatMessages.find((item) => item.tenantId === tenant.id && item.id === messagePollVoteMatch.messageId);
+        emitRealtime({
+          tenantId: tenant.id,
+          threadId: message?.threadId || null,
+          type: "chat.poll_voted",
+          payload: {
+            messageId: messagePollVoteMatch.messageId,
+            userId: ctx.userId,
+            optionIds
+          }
+        });
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "workspace_poll_voted",
+          details: {
+            messageId: messagePollVoteMatch.messageId,
+            optionIds
+          }
+        });
+        await persistState();
+        respondJson(res, 200, { poll });
         return;
       }
 
@@ -1522,7 +2984,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         requireTenantHeader(ctx);
         requireTenant(state, ctx.tenantId);
         const q = base.searchParams.get("q") ?? "";
-        const files = listWorkspaceDocFiles(state, ctx.tenantId, { q });
+        const files = await listWorkspaceDocFiles(state, ctx.tenantId, { q });
         respondJson(res, 200, { files });
         return;
       }
@@ -1813,6 +3275,7 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
           const channels = [];
           if (settings.channels?.slack?.enabled) channels.push("slack");
           if (settings.channels?.telegram?.enabled) channels.push("telegram");
+          if (settings.channels?.discord?.enabled) channels.push("discord");
           if (!channels.length) channels.push("email");
           result.delivery = deliverAnalysisRun(state, tenant, completed, { notifyReportDelivery }, { channels });
         } else {
@@ -2590,6 +4053,93 @@ export async function createPlatform({ seedDemo = true, startBackground = true }
         const body = await parseJsonBody(req);
         const preview = previewReportTemplate(state, ctx.tenantId, reportTemplatePreviewMatch.templateId, body);
         respondJson(res, 200, preview);
+        return;
+      }
+
+      if (method === "POST" && pathname === "/v1/skills/drafts/generate") {
+        const ctx = authContextFromHeaders(req.headers);
+        requireTenantHeader(ctx);
+        requireRole(ctx, ["owner", "admin", "operator", "analyst"]);
+        const tenant = requireTenant(state, ctx.tenantId);
+        const body = await parseJsonBody(req);
+        const answers = body.answers && typeof body.answers === "object" ? body.answers : {};
+        const settings = ensureTenantSettings(state, tenant);
+        const resolved = resolveSkillGenerationCredential(
+          state,
+          tenant.id,
+          settings,
+          body.provider,
+          body.apiKey
+        );
+
+        const warnings = [];
+        let generationMode = "fallback";
+        let providerUsed = normalizeProviderName(resolved.provider || body.provider || settings.modelPreferences?.defaultProvider || "managed");
+        let modelUsed = null;
+        let manifest = buildSkillManifestFromAnswers(answers);
+        let skillMd = buildSkillMarkdown(manifest);
+
+        if (resolved.apiKey && providerUsed !== "managed") {
+          try {
+            const generated = await generateSkillArtifactsWithLlm({
+              provider: providerUsed,
+              apiKey: resolved.apiKey,
+              answers,
+              workspaceAgentName: getWorkspaceAgentProfile(state, tenant.id)?.name || "Titus"
+            });
+            generationMode = "llm";
+            providerUsed = generated.provider;
+            modelUsed = generated.model;
+            manifest = generated.manifest;
+            skillMd = generated.skillMarkdown;
+          } catch (error) {
+            warnings.push(error.message || "llm_generation_failed");
+          }
+        } else {
+          warnings.push("no_valid_api_key_configured_fallback_used");
+        }
+
+        const draft = createSkillDraft(state, tenant, { manifest });
+        const validation = validateSkillDraft(state, tenant.id, draft.draftId);
+        if (validation.errors.length) {
+          warnings.push("generated_manifest_invalid_using_safe_defaults");
+          draft.manifest = buildSkillManifestFromAnswers(answers);
+          skillMd = buildSkillMarkdown(draft.manifest);
+          validateSkillDraft(state, tenant.id, draft.draftId);
+          generationMode = "fallback";
+          modelUsed = null;
+        }
+
+        draft.generation = {
+          mode: generationMode,
+          provider: providerUsed,
+          model: modelUsed,
+          source: resolved.source,
+          generatedAt: new Date().toISOString(),
+          warnings
+        };
+
+        pushAudit(state, {
+          tenantId: tenant.id,
+          actorId: ctx.userId,
+          action: "skill_draft_generated",
+          details: {
+            draftId: draft.draftId,
+            mode: draft.generation.mode,
+            provider: draft.generation.provider
+          }
+        });
+        await persistState();
+        respondJson(res, 201, {
+          draft,
+          result: {
+            draftId: draft.draftId,
+            status: draft.status,
+            errors: draft.validationErrors
+          },
+          generation: draft.generation,
+          skillMd
+        });
         return;
       }
 
